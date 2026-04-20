@@ -15,5 +15,5 @@
   uboot   = import ./uboot.nix   { inherit pkgs; };
   sysinfo = import ./sysinfo/sysinfo.nix { inherit pkgs; };
   htop    = import ./htop.nix    { inherit pkgs; };
-  
+  meshing-around = import ./meshing-around.nix  { inherit pkgs; };
 }

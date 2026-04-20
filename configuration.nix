@@ -13,6 +13,7 @@ in
   packages = with localPkgs; [ 
     sysinfo
     htop 
+    meshing-around
     ];
 
   services.ssh.enable = true;
