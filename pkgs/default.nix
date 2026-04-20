@@ -13,6 +13,7 @@
 
 {
   uboot   = import ./uboot.nix   { inherit pkgs; };
-  sysinfo = import ./sysinfo.nix { inherit pkgs; };
+  sysinfo = import ./sysinfo/sysinfo.nix { inherit pkgs; };
   htop    = import ./htop.nix    { inherit pkgs; };
+  
 }

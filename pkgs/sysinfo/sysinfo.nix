@@ -1,18 +1,3 @@
-# Example custom package: a small static C utility that prints system info.
-#
-# Built against pkgs.pkgsStatic so the binary needs no shared libraries
-# and runs directly in the minimal rootfs.
-#
-# Wire it into configuration.nix:
-#
-#   let
-#     sysinfo = import ./pkgs/sysinfo.nix { inherit pkgs; };
-#   in {
-#     packages = [ sysinfo ];
-#     ...
-#   }
-#
-# Then on the device just run:  sysinfo
 
 { pkgs }:
 
