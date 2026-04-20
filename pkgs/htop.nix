@@ -1,16 +1,12 @@
 { lib
-, pkgs
-, fetchFromGitHub
-, ncurses
-, pkg-config
-, autoreconfHook
+, pkgsStatic
 }:
 
-pkgs.pkgsStatic.stdenv.mkDerivation rec {
+pkgsStatic.stdenv.mkDerivation rec {
   pname = "htop";
   version = "3.5.0";
 
-  src = fetchFromGitHub {
+  src = pkgsStatic.fetchFromGitHub {
     owner = "htop-dev";
     repo = "htop";
     rev = "dd9d7b100faa8ae57ec20be32d6353952b15eeec";
@@ -18,12 +14,12 @@ pkgs.pkgsStatic.stdenv.mkDerivation rec {
   };
 
   nativeBuildInputs = [
-    autoreconfHook
-    pkg-config
+    pkgsStatic.autoreconfHook
+    pkgsStatic.pkg-config
   ];
 
   buildInputs = [
-    ncurses
+    pkgsStatic.ncurses
   ];
 
   configureFlags = [
