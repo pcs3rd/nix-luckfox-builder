@@ -18,7 +18,7 @@
 #
 # Logs are written to /var/log/meshing-around.log
 
-{ ... }:
+{ pkgs, ... }:
 
 {
   services.user.meshing-around = {

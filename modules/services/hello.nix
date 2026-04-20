@@ -10,7 +10,7 @@
 # The service runs once after boot and writes to /var/log/hello.log.
 # Check the output with:  cat /var/log/hello.log
 
-{ ... }:
+{ pkgs, ... }:
 
 {
   services.user.hello = {
