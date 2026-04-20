@@ -28,6 +28,6 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
     "--enable-unicode"
   ];
   meta.description = "htop";
-};
+}
 
 
