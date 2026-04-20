@@ -153,7 +153,7 @@ pkgs.stdenv.mkDerivation {
       # in the Nix build sandbox.  Patch it to use the actual Nix store linker.
       # The Nix store is read-only; copy loaderimage to the build dir before patching.
       cp ../rkbin/tools/loaderimage ./loaderimage
-      chmod +x ./loaderimage
+      chmod 755 ./loaderimage   # cp preserves the store's r-x bits; patchelf needs w
       # Extract the ELF interpreter from a known-working binary (patchelf itself)
       # using its Nix store path directly — 'which' is not available in the sandbox.
       interp=$(patchelf --print-interpreter "${pkgs.buildPackages.patchelf}/bin/patchelf")
