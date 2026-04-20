@@ -129,7 +129,7 @@ EOF
 #   0x00018000   98304     48  MiB  — rootfs
 #   0x00118000 1146880    560  MiB  — userdata
 
-DISK=${1:?Usage: $0 /dev/sdX}
+DISK=''${1:?Usage: $0 /dev/sdX}
 
 echo "Flashing to $DISK ..."
 
