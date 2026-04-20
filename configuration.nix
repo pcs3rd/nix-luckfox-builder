@@ -24,4 +24,8 @@ in
   };
 
   rockchip.enable = true;
+
+  # Root password — generate a new hash with: openssl passwd -6 yourpassword
+  # The default "!" locks the account entirely (no login without a hash set).
+  users.root.hashedPassword = "$6$vW4NFpymQUO5omMq$Z1vcrtaS7bawg02BETzqGTpy35wWgqPMBeFKua6KyETDPUlEVvEldJ8EiR931L1UXnLMlBb/PgGhbnPnVo1/81"; # is `1234`
 }

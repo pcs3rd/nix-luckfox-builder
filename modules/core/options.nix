@@ -76,6 +76,20 @@ with lib;
       };
     };
 
+    users = {
+      root = {
+        hashedPassword = lib.mkOption {
+          type        = types.str;
+          default     = "!";
+          description = ''
+            Hashed password for the root account (/etc/shadow format).
+            Generate with:  openssl passwd -6 yourpassword
+            The default "!" locks the account (no password login possible).
+          '';
+        };
+      };
+    };
+
     device = {
       name = mkOption {
         type    = types.str;

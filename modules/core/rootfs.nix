@@ -3,7 +3,7 @@
 {
   # ── Root filesystem directory ───────────────────────────────────────────────
   config.system.build.rootfs = pkgs.runCommand "rootfs" {} ''
-    mkdir -p $out/{bin,sbin,etc,proc,sys,dev,root,lib}
+    mkdir -p $out/{bin,sbin,etc,proc,sys,dev,root,lib,var/log}
 
     # ── busybox ────────────────────────────────────────────────────────────
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox $out/bin/
@@ -29,6 +29,15 @@
     #
     # Actually: the kernel populates /dev/console itself via devtmpfs when
     # CONFIG_DEVTMPFS_MOUNT=y. We just need to mount devtmpfs first thing.
+
+    # ── udhcpc wrapper (redirects noisy lease output to a log file) ───────
+    ${lib.optionalString config.networking.dhcp.enable ''
+      cat > $out/sbin/start-dhcp << 'DHCP_EOF'
+#!/bin/sh
+exec /bin/busybox udhcpc -i ${config.networking.interface} -f >> /var/log/udhcpc.log 2>&1
+DHCP_EOF
+      chmod +x $out/sbin/start-dhcp
+    ''}
 
     # ── SSH (dropbear — static build, no dynamic linker needed) ───────────
     ${lib.optionalString config.services.ssh.enable ''
@@ -105,12 +114,29 @@ ${lib.optionalString config.services.getty.enable
 ${lib.optionalString config.services.ssh.enable
   "::respawn:/bin/dropbear -R -F"}
 ${lib.optionalString config.networking.dhcp.enable
-  "::sysinit:/bin/busybox udhcpc -i ${config.networking.interface} -f &"}
+  "::sysinit:/sbin/start-dhcp"}
 ::ctrlaltdel:/bin/busybox reboot
 EOF
 
     # ── hostname ───────────────────────────────────────────────────────────
     echo "${config.networking.hostname}" > $out/etc/hostname
+
+    # ── user / password database ───────────────────────────────────────────
+    # passwd: shadow-style (password field is 'x', real hash is in shadow)
+    cat > $out/etc/passwd << 'PASSWD_EOF'
+root:x:0:0:root:/root:/bin/sh
+nobody:x:65534:65534:nobody:/:/bin/false
+PASSWD_EOF
+
+    # shadow: root hash set at build time via users.root.hashedPassword
+    printf 'root:%s:1:0:99999:7:::\n' "${config.users.root.hashedPassword}" \
+      > $out/etc/shadow
+    chmod 640 $out/etc/shadow
+
+    cat > $out/etc/group << 'GROUP_EOF'
+root:x:0:
+nogroup:x:65534:
+GROUP_EOF
   '';
 
   # ── Initramfs (cpio.gz) — used for QEMU boot ───────────────────────────────
