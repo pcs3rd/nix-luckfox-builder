@@ -145,7 +145,9 @@ pkgs.stdenv.mkDerivation {
     if [ -f SPL ]; then
       cp SPL $out/SPL
     else
-      tools/mkimage -n rv1106 -T rksd -d spl/u-boot-spl.bin $out/SPL
+      # rv1106 is not in mkimage's SoC list; rv1126 is the parent silicon and
+      # uses the same idbloader format — the bootrom header is compatible.
+      tools/mkimage -n rv1126 -T rksd -d spl/u-boot-spl.bin $out/SPL
     fi
 
     # ── Main U-Boot binary ────────────────────────────────────────────────────
