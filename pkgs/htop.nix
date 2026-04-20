@@ -14,6 +14,7 @@ pkgs.pkgsStatic.stdenv.mkDerivation rec {
   nativeBuildInputs = [
     pkgs.autoreconfHook
     pkgs.pkg-config
+    pkgs.makeWrapper
   ];
 
   buildInputs = [
@@ -23,6 +24,14 @@ pkgs.pkgsStatic.stdenv.mkDerivation rec {
   configureFlags = [
     "--enable-unicode"
   ];
+
+  postInstall = ''
+    mkdir -p $out/share
+    cp -r ${pkgs.ncurses}/share/terminfo $out/share/terminfo
+
+    wrapProgram $out/bin/htop \
+      --set TERMINFO $out/share/terminfo
+  '';
 
   meta = with pkgs.lib; {
     description = "Interactive process viewer";
