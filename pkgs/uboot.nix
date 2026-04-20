@@ -19,7 +19,7 @@
 
 let
   LUCKFOX_REV    = "438d5270a38c59a74f142dfa31ffbf51b096ce72";
-  LUCKFOX_SHA256 = "sha256-7quO4isxA1ljnV6Iu0BI2B1VeguTYaqeBxO3FJLZe8A=";
+  LUCKFOX_SHA256 = "sha256-iPmQLKzgznBp3CJMvbbGrtLgd9P0jHgBrynqGnsAygI=";
 
 in
 
