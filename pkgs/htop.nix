@@ -28,6 +28,6 @@
       "--enable-unicode"
     ];
     meta.description = "htop";
-  }
+  };
 }
 
