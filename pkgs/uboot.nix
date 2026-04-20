@@ -131,8 +131,30 @@ pkgs.stdenv.mkDerivation {
 
   installPhase = ''
     mkdir -p $out
-    cp SPL        $out/SPL
-    cp u-boot.bin $out/u-boot.bin
+
+    # ── Diagnostics ───────────────────────────────────────────────────────────
+    echo "=== U-Boot build artifacts ==="
+    find . -maxdepth 3 \
+      \( -name "*.img" -o -name "*.bin" -o -name "SPL" -o -name "uboot.img" \) \
+      -not -path "*/arch/*" -not -path "*/board/*" | sort
+
+    # ── SPL / idbloader ───────────────────────────────────────────────────────
+    # The SDK make.sh produces 'SPL' by running rkbin/tools/loaderimage.
+    # Without that proprietary tool we use mkimage -T rksd, which prepends the
+    # Rockchip idbloader header (same format the bootrom expects on SD card).
+    if [ -f SPL ]; then
+      cp SPL $out/SPL
+    else
+      tools/mkimage -n rv1106 -T rksd -d spl/u-boot-spl.bin $out/SPL
+    fi
+
+    # ── Main U-Boot binary ────────────────────────────────────────────────────
+    # Prefer the packaged .img if the build produced one; fall back to raw bin.
+    if [ -f u-boot.img ]; then
+      cp u-boot.img $out/u-boot.img
+    else
+      cp u-boot.bin $out/u-boot.bin
+    fi
   '';
 
   meta = {
