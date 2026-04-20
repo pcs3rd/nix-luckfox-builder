@@ -62,11 +62,19 @@ pkgs.stdenv.mkDerivation {
   ];
 
   configurePhase = ''
+    # The Luckfox-specific defconfig lives in the SDK overlay directory, not in
+    # u-boot/configs/.  The SDK Makefile copies it there before building; we
+    # do the same.
+    # Path: sourceRoot = sysdrv/source/uboot/u-boot
+    #       defconfig  = sysdrv/tools/board/uboot/luckfox_rv1106_uboot_defconfig
+    #       relative   = ../../../tools/board/uboot/luckfox_rv1106_uboot_defconfig
+    cp ../../../tools/board/uboot/luckfox_rv1106_uboot_defconfig configs/
+
     make \
       ARCH=arm \
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
-      rv1106_defconfig
+      luckfox_rv1106_uboot_defconfig
 
     # The DDR init blob is in the same repo under sysdrv/source/uboot/rkbin/.
     # From sourceRoot (sysdrv/source/uboot/u-boot) it's one level up at ../rkbin/.
