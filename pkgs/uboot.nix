@@ -152,7 +152,9 @@ pkgs.stdenv.mkDerivation {
       # hardcoded /lib64/ld-linux-x86-64.so.2 interpreter that doesn't exist
       # in the Nix build sandbox.  Patch it to use the actual Nix store linker.
       chmod +x ../rkbin/tools/loaderimage
-      interp=$(patchelf --print-interpreter "$(which patchelf)")
+      # Extract the ELF interpreter from a known-working binary (patchelf itself)
+      # using its Nix store path directly — 'which' is not available in the sandbox.
+      interp=$(patchelf --print-interpreter "${pkgs.buildPackages.patchelf}/bin/patchelf")
       patchelf --set-interpreter "$interp" ../rkbin/tools/loaderimage
 
       echo "=== loaderimage usage ==="
