@@ -78,7 +78,7 @@ pkgs.stdenv.mkDerivation {
       ARCH=arm \
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
-      KCFLAGS="-Wno-error=enum-int-mismatch -Wno-error=maybe-uninitialized"
+      KCFLAGS="-Wno-error=enum-int-mismatch -Wno-error=maybe-uninitialized -Wno-error=address"
   '';
 
   installPhase = ''
