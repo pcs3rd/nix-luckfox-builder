@@ -21,6 +21,11 @@ let
   LUCKFOX_REV    = "438d5270a38c59a74f142dfa31ffbf51b096ce72";
   LUCKFOX_SHA256 = "sha256-iPmQLKzgznBp3CJMvbbGrtLgd9P0jHgBrynqGnsAygI=";
 
+  # In a cross-compilation stdenv, Nix gcc wrappers may not be available as a
+  # bare "gcc" on PATH.  Pin HOSTCC directly to the store path so U-Boot's
+  # scripts/Makefile.host can always find the host C compiler.
+  hostCC = "${pkgs.buildPackages.stdenv.cc}/bin/gcc";
+
 in
 
 pkgs.stdenv.mkDerivation {
@@ -39,7 +44,7 @@ pkgs.stdenv.mkDerivation {
 
   nativeBuildInputs = with pkgs.buildPackages; [
     gnumake
-    gcc
+    stdenv.cc   # provides the host C compiler at the store path used by hostCC
     bison
     flex
     openssl
@@ -52,7 +57,7 @@ pkgs.stdenv.mkDerivation {
     make \
       ARCH=arm \
       CROSS_COMPILE=arm-linux-gnueabihf- \
-      HOSTCC=gcc \
+      HOSTCC=${hostCC} \
       luckfox_rv1106_uboot_defconfig
 
     # The DDR init blob is in the same repo under sysdrv/source/uboot/rkbin/.
@@ -64,7 +69,7 @@ pkgs.stdenv.mkDerivation {
     make -j$NIX_BUILD_CORES \
       ARCH=arm \
       CROSS_COMPILE=arm-linux-gnueabihf- \
-      HOSTCC=gcc
+      HOSTCC=${hostCC}
   '';
 
   installPhase = ''
