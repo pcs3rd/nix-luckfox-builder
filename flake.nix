@@ -65,11 +65,17 @@
         runtimeInputs = [ hostPkgs.qemu ];
 
         text = ''
+          # Pick a free ephemeral port for SSH forwarding so we never
+          # collide with whatever else is already running on the host.
+          SSH_PORT=$(python3 -c \
+            "import socket; s=socket.socket(); s.bind(('',0)); \
+             print(s.getsockname()[1]); s.close()")
+
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  Luckfox Pico Mini B — QEMU virt (ARMv7 Cortex-A7)"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  Serial console below (Ctrl-A X to exit QEMU)"
-          echo "  SSH: ssh root@localhost -p 2222"
+          echo "  SSH: ssh root@localhost -p $SSH_PORT"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo ""
 
@@ -81,7 +87,7 @@
             -initrd ${picoMiniB-qemu.config.system.build.initramfs} \
             -append "${picoMiniB-qemu.config.boot.cmdline}" \
             -nographic \
-            -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+            -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
             -device virtio-net-device,netdev=net0 \
             -device virtio-rng-device
         '';
