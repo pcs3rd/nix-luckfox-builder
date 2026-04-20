@@ -77,7 +77,8 @@ pkgs.stdenv.mkDerivation {
     make -j$NIX_BUILD_CORES \
       ARCH=arm \
       CROSS_COMPILE=${crossCompile} \
-      HOSTCC=${hostCC}
+      HOSTCC=${hostCC} \
+      KCFLAGS="-Wno-error=enum-int-mismatch -Wno-error=maybe-uninitialized"
   '';
 
   installPhase = ''
