@@ -10,7 +10,10 @@ in
   ];
 
   # Extra packages — add your own derivations from pkgs/ here.
-  packages = [ localPkgs.sysinfo ];
+  packages = with localPkgs; [ 
+    sysinfo
+    htop 
+    ];
 
   services.ssh.enable = true;
   services.getty.enable = true;

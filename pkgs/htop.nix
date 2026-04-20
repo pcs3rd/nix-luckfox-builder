@@ -22,11 +22,14 @@ pkgs.pkgsStatic.stdenv.mkDerivation rec {
 
   configureFlags = [
     "--enable-unicode"
-    "--disable-database"
-    "--with-fallbacks=vt100,linux"                                               
-                                                          
-
   ];
+
+  postInstall = ''
+    mkdir -p $out/etc/terminfo/v
+    mkdir -p $out/etc/terminfo/l
+    cp ${pkgs.ncurses}/share/terminfo/v/vt100 $out/etc/terminfo/v/
+    cp ${pkgs.ncurses}/share/terminfo/l/linux $out/etc/terminfo/l/
+  '';
 
   meta = with pkgs.lib; {
     description = "Interactive process viewer";
