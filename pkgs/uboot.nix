@@ -1,17 +1,17 @@
 # U-Boot derivation for the Luckfox Pico Mini B (Rockchip RV1103 / Cortex-A7)
 #
-# ── Before this builds you must fill in two things ──────────────────────────
+# Note: the chip is marketed as RV1103 but Rockchip's own SDK sets RK_CHIP=rv1106
+# throughout — they are the same silicon. Defconfigs and DDR blobs are all rv1106.
 #
-# 1. luckfox-pico source rev + hash
-#    Run:  nix-prefetch-github luckfox-eng33 luckfox-pico
-#    Then replace LUCKFOX_REV and LUCKFOX_SHA256 below.
+# The DDR blob lives inside the luckfox-pico repo itself at:
+#   sysdrv/source/uboot/rkbin/bin/rv11/rv1106_ddr_924MHz_v1.15.bin
 #
-# 2. Rockchip DDR blob URL + hash
-#    Browse: https://github.com/rockchip-linux/rkbin/tree/master/bin/rv11
-#    Find the rv1103_ddr_*MHz_vX.XX.bin that matches what the Luckfox SDK pins
-#    (check sysdrv/source/uboot/u-boot/make.sh or the SDK's RKBIN_DESC file).
-#    Run:  nix-prefetch-url <raw-url>
-#    Then replace RKBIN_URL and RKBIN_SHA256 below.
+# So no separate fetchurl is needed — it's copied from the already-fetched source.
+#
+# ── Before this builds you need to fill in the source hash ──────────────────
+#
+#   Run:  nix-prefetch-github LuckfoxTECH luckfox-pico
+#   Then replace LUCKFOX_REV and LUCKFOX_SHA256 below.
 #
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -21,16 +21,6 @@ let
   LUCKFOX_REV    = "438d5270a38c59a74f142dfa31ffbf51b096ce72";
   LUCKFOX_SHA256 = "sha256-7quO4isxA1ljnV6Iu0BI2B1VeguTYaqeBxO3FJLZe8A=";
 
-  RKBIN_URL    = "https://github.com/rockchip-linux/rkbin/raw/FILL_IN_RKBIN_REV/bin/rv11/rv1103_ddr_924MHz_vFILL_IN.bin";
-  RKBIN_SHA256 = "sha256-FILL_IN_HASH=";
-
-  # ── Rockchip DDR init blob (closed-source, fetchurl only) ─────────────────
-  rkbin-ddr = pkgs.fetchurl {
-    url    = RKBIN_URL;
-    sha256 = RKBIN_SHA256;
-    name   = "rv1103_ddr.bin";
-  };
-
 in
 
 pkgs.stdenv.mkDerivation {
@@ -38,7 +28,7 @@ pkgs.stdenv.mkDerivation {
   version = "2024.01-luckfox";
 
   src = pkgs.fetchFromGitHub {
-    owner  = "luckfox-eng";
+    owner  = "LuckfoxTECH";
     repo   = "luckfox-pico";
     rev    = LUCKFOX_REV;
     sha256 = LUCKFOX_SHA256;
@@ -58,16 +48,15 @@ pkgs.stdenv.mkDerivation {
     pkg-config
   ];
 
-  # The RV1103 defconfig lives in configs/luckfox_rv1103_defconfig inside
-  # the U-Boot tree. If the SDK uses a different name, adjust here.
   configurePhase = ''
     make \
       ARCH=arm \
       CROSS_COMPILE=arm-linux-gnueabihf- \
-      luckfox_rv1103_defconfig
+      luckfox_rv1106_uboot_defconfig
 
-    # Rockchip's SPL Makefile looks for the DDR blob alongside the source
-    cp ${rkbin-ddr} ./rv1103_ddr.bin
+    # The DDR init blob is in the same repo under sysdrv/source/uboot/rkbin/.
+    # From sourceRoot (sysdrv/source/uboot/u-boot) it's one level up at ../rkbin/.
+    cp ../rkbin/bin/rv11/rv1106_ddr_924MHz_v1.15.bin ./rv1106_ddr.bin
   '';
 
   buildPhase = ''
@@ -83,7 +72,7 @@ pkgs.stdenv.mkDerivation {
   '';
 
   meta = {
-    description = "U-Boot for Luckfox Pico Mini B (RV1103)";
+    description = "U-Boot for Luckfox Pico Mini B (RV1103/RV1106)";
     platforms   = [ "x86_64-linux" "aarch64-linux" ];
   };
 }
