@@ -78,18 +78,35 @@ pkgs.stdenv.mkDerivation {
 
     # ── Trim SPL size for modern GCC ─────────────────────────────────────────
     # The SDK was built with Linaro GCC 6.3.1 which generates smaller code.
-    # Modern GCC exceeds the 0x28000 (160 KB) SPL_MAX_SIZE limit.  Disable
-    # SPL features that are only needed for SPI-NOR/NAND boot paths — the
-    # Luckfox Pico Mini B uses SD card exclusively.
+    # Modern GCC exceeds the 0x28000 (160 KB) SPL_MAX_SIZE limit.
+    #
+    # Dependency note:
+    #   CONFIG_MTD_SPI_NAND → spi_mem_exec_op → CONFIG_SPL_SPI_SUPPORT
+    # Disabling CONFIG_SPL_SPI_SUPPORT causes a link failure in the SPL
+    # because MTD_SPI_NAND drivers (still compiled in via SPL_MTD_SUPPORT)
+    # call spi_mem_exec_op.  Keep the SPI bus layer; only disable the SPI
+    # NOR flash driver (not needed for SD-card-only boot).
     disable_config() {
       sed -i "s/^$1=y/# $1 is not set/" .config
     }
-    # SPI bus and flash drivers are not needed for SD-card-only boot.
-    # SPL_MTD_SUPPORT must stay — spl_fit.c calls mtd_blk_map_fit().
-    disable_config CONFIG_SPL_SPI_SUPPORT
+
+    # SPI NOR flash: not needed for SD-card-only boot.
     disable_config CONFIG_SPL_SPI_FLASH_SUPPORT
-    # A/B partition switching adds code not needed for simple SD boot.
+
+    # A/B partition switching: not needed for single SD-card boot.
     disable_config CONFIG_SPL_AB
+
+    # LZMA decompressor in the SPL adds ~20 KB; GZIP is sufficient.
+    # The Rockchip DDR init FIT image uses GZIP compression.
+    disable_config CONFIG_SPL_LZMA
+
+    # Rockchip secure-boot and crypto helpers are not needed for plain SD boot.
+    disable_config CONFIG_SPL_DM_CRYPTO
+    disable_config CONFIG_SPL_ROCKCHIP_CRYPTO_V2
+    disable_config CONFIG_SPL_ROCKCHIP_SECURE_OTP
+
+    # EFI partition scanning is only needed for EFI boot paths.
+    disable_config CONFIG_SPL_EFI_PARTITION
 
     # Recalculate Kconfig dependencies after the above changes.
     make \
