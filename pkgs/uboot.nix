@@ -73,6 +73,7 @@ pkgs.stdenv.mkDerivation {
 
   meta = {
     description = "U-Boot for Luckfox Pico Mini B (RV1103/RV1106)";
-    platforms   = [ "x86_64-linux" "aarch64-linux" ];
+    # No platforms restriction — this is a cross-compiled firmware target and
+    # can be built from any host that supports the ARM cross-toolchain.
   };
 }
