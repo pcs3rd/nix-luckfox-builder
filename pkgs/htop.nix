@@ -9,10 +9,10 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
 
   # Single-file project — point src directly at the .c file.
   src = fetchFromGitHub {
-    "owner" = "htop-dev",
-    "repo" = "htop",
-    "rev" = "dd9d7b100faa8ae57ec20be32d6353952b15eeec",
-    "hash" = "sha256-gydXIExIdsTbCQnyqlMf9h77hzPqihDr5FLw1pzSiWg="
+    "owner" = "htop-dev";
+    "repo" = "htop";
+    "rev" = "dd9d7b100faa8ae57ec20be32d6353952b15eeec";
+    "hash" = "sha256-gydXIExIdsTbCQnyqlMf9h77hzPqihDr5FLw1pzSiWg=";
   };
 
   nativeBuildInputs = [
