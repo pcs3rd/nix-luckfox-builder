@@ -1,8 +1,7 @@
 { pkgs, ... }:
 
 let
-  uboot   = import ./pkgs/uboot.nix   { inherit pkgs; };
-  sysinfo = import ./pkgs/sysinfo.nix { inherit pkgs; };
+  localPkgs = import ./pkgs { inherit pkgs; };
 in
 
 {
@@ -11,7 +10,7 @@ in
   ];
 
   # Extra packages — add your own derivations from pkgs/ here.
-  packages = [ sysinfo ];
+  packages = [ localPkgs.sysinfo ];
 
   services.ssh.enable = true;
   services.getty.enable = true;
@@ -23,8 +22,8 @@ in
 
   boot.uboot = {
     enable  = true;
-    spl     = "${uboot}/SPL";
-    package = "${uboot}/u-boot.img";   # Rockchip build produces u-boot.img (FIT image)
+    spl     = "${localPkgs.uboot}/SPL";
+    package = "${localPkgs.uboot}/u-boot.img";   # Rockchip build produces u-boot.img (FIT image)
   };
 
   rockchip.enable = true;

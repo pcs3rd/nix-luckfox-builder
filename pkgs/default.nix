@@ -1,0 +1,18 @@
+# Package set for the Luckfox Pico Mini B.
+#
+# Import this file to get an attrset of all local packages:
+#
+#   pkgSet = import ./pkgs { inherit pkgs; };
+#
+# Then reference individual packages:
+#   pkgSet.uboot      — U-Boot SPL + binary
+#   pkgSet.sysinfo    — static system-info utility
+#   pkgSet.htop       — htop (if enabled)
+
+{ pkgs }:
+
+{
+  uboot   = import ./uboot.nix   { inherit pkgs; };
+  sysinfo = import ./sysinfo.nix { inherit pkgs; };
+  htop    = import ./htop.nix    { inherit pkgs; };
+}
