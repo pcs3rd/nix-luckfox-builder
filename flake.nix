@@ -68,7 +68,7 @@
           # Pick a free ephemeral port for SSH forwarding so we never
           # collide with whatever else is already running on the host.
           SSH_PORT=$(python3 -c \
-            "import socket; s=socket.socket(); s.bind(('',0)); \
+            "import socket; s=socket.socket(); s.bind((\"\",0)); \
              print(s.getsockname()[1]); s.close()")
 
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
