@@ -215,25 +215,35 @@ EXPAND_EOF
     ) config.services.user)}
 
     # ── Extra packages ─────────────────────────────────────────────────────
+    # Walk every top-level directory in the package output:
+    #   bin / sbin — copy binaries, but skip names that already exist so we
+    #                don't overwrite BusyBox applet symlinks.
+    #   everything else (etc, lib, share, var, …) — merged verbatim into the
+    #                rootfs so installPhase-created directories are preserved.
     ${lib.concatMapStrings (pkg: ''
-      for dir in bin sbin; do
-        if [ -d "${pkg}/$dir" ]; then
-          for f in "${pkg}/$dir/"*; do
-            [ -e "$f" ] || continue
-            name=$(basename "$f")
-            # Don't overwrite busybox applet symlinks already in place
-            if [ ! -e "$out/bin/$name" ] && [ ! -e "$out/sbin/$name" ]; then
-              cp -L "$f" "$out/$dir/$name"
-              chmod +x "$out/$dir/$name"
-            fi
-          done
-        fi
+      for entry in "${pkg}"/*/; do
+        [ -d "$entry" ] || continue
+        dirname=$(basename "$entry")
+        case "$dirname" in
+          bin|sbin)
+            mkdir -p "$out/$dirname"
+            for f in "$entry"*; do
+              [ -e "$f" ] || continue
+              name=$(basename "$f")
+              if [ ! -e "$out/bin/$name" ] && [ ! -e "$out/sbin/$name" ]; then
+                cp -L "$f" "$out/$dirname/$name"
+                chmod +x "$out/$dirname/$name"
+              fi
+            done
+            ;;
+          *)
+            # Merge the directory tree into the rootfs.
+            # -rL follows symlinks so store symlinks become real files.
+            mkdir -p "$out/$dirname"
+            cp -rL "$entry/." "$out/$dirname/" 2>/dev/null || true
+            ;;
+        esac
       done
-      # Copy shared libraries if present (needed for dynamic binaries)
-      if [ -d "${pkg}/lib" ]; then
-        mkdir -p $out/lib
-        cp -rL "${pkg}/lib/"* $out/lib/ 2>/dev/null || true
-      fi
     '') config.packages}
 
     # ── inittab ────────────────────────────────────────────────────────────
