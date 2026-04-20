@@ -3,6 +3,8 @@
 let
   uboot   = import ./pkgs/uboot.nix   { inherit pkgs; };
   sysinfo = import ./pkgs/sysinfo.nix { inherit pkgs; };
+  htop = import ./pkgs/htop.nix { inherit pkgs; };
+
 in
 
 {
