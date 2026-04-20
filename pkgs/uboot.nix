@@ -139,19 +139,24 @@ pkgs.stdenv.mkDerivation {
       -not -path "*/arch/*" -not -path "*/board/*" | sort
 
     # ── SPL / idbloader ───────────────────────────────────────────────────────
-    # The SDK make.sh produces 'SPL' by running rkbin/tools/loaderimage.
-    # Without that proprietary tool we use mkimage -T rksd, which prepends the
-    # Rockchip idbloader header (same format the bootrom expects on SD card).
+    # mkimage -T rksd rejects spl/u-boot-spl.bin because the rv1126 SRAM limit
+    # is 0xf000 (60 KB) but the built SPL is ~166 KB.  The SDK make.sh uses
+    # rkbin/tools/loaderimage which handles the two-stage load: the DDR init
+    # blob runs from SRAM, then the SPL is loaded into DDR and executed.
+    # loaderimage is an x86_64 ELF binary in the fetched source tree.
     if [ -f SPL ]; then
       cp SPL $out/SPL
     else
-      # rv1106 is not in mkimage's SoC list; rv1126 is the parent silicon and
-      # uses the same idbloader format — the bootrom header is compatible.
-      tools/mkimage -n rv1126 -T rksd -d spl/u-boot-spl.bin $out/SPL
+      chmod +x ../rkbin/tools/loaderimage
+      echo "=== loaderimage usage ==="
+      ../rkbin/tools/loaderimage --help 2>&1 || true
+      echo "=== packing SPL ==="
+      # 0x400000 = typical DDR load address for the RV1106 SPL.
+      # Adjust if loaderimage reports an error about the address.
+      ../rkbin/tools/loaderimage --pack --uboot spl/u-boot-spl.bin $out/SPL 0x400000
     fi
 
     # ── Main U-Boot binary ────────────────────────────────────────────────────
-    # Prefer the packaged .img if the build produced one; fall back to raw bin.
     if [ -f u-boot.img ]; then
       cp u-boot.img $out/u-boot.img
     else
