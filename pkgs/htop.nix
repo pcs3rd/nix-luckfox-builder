@@ -1,12 +1,10 @@
-{ lib
-, pkgsStatic
-}:
+{ pkgs }:
 
-pkgsStatic.stdenv.mkDerivation rec {
+pkgs.pkgsStatic.stdenv.mkDerivation rec {
   pname = "htop";
   version = "3.5.0";
 
-  src = pkgsStatic.fetchFromGitHub {
+  src = pkgs.fetchFromGitHub {
     owner = "htop-dev";
     repo = "htop";
     rev = "dd9d7b100faa8ae57ec20be32d6353952b15eeec";
@@ -14,19 +12,19 @@ pkgsStatic.stdenv.mkDerivation rec {
   };
 
   nativeBuildInputs = [
-    pkgsStatic.autoreconfHook
-    pkgsStatic.pkg-config
+    pkgs.autoreconfHook
+    pkgs.pkg-config
   ];
 
   buildInputs = [
-    pkgsStatic.ncurses
+    pkgs.pkgsStatic.ncurses
   ];
 
   configureFlags = [
     "--enable-unicode"
   ];
 
-  meta = with lib; {
+  meta = with pkgs.lib; {
     description = "Interactive process viewer";
     homepage = "https://htop.dev/";
     license = licenses.gpl2Only;
