@@ -151,20 +151,22 @@ pkgs.stdenv.mkDerivation {
       # loaderimage is a proprietary x86_64 ELF in the rkbin tree.  It has a
       # hardcoded /lib64/ld-linux-x86-64.so.2 interpreter that doesn't exist
       # in the Nix build sandbox.  Patch it to use the actual Nix store linker.
-      chmod +x ../rkbin/tools/loaderimage
+      # The Nix store is read-only; copy loaderimage to the build dir before patching.
+      cp ../rkbin/tools/loaderimage ./loaderimage
+      chmod +x ./loaderimage
       # Extract the ELF interpreter from a known-working binary (patchelf itself)
       # using its Nix store path directly — 'which' is not available in the sandbox.
       interp=$(patchelf --print-interpreter "${pkgs.buildPackages.patchelf}/bin/patchelf")
-      patchelf --set-interpreter "$interp" ../rkbin/tools/loaderimage
+      patchelf --set-interpreter "$interp" ./loaderimage
 
       echo "=== loaderimage usage ==="
-      ../rkbin/tools/loaderimage --help 2>&1 || true
+      ./loaderimage --help 2>&1 || true
 
       echo "=== packing SPL ==="
       # loaderimage creates a Rockchip miniloader image where the DDR init code
       # runs from SRAM then loads the SPL into DDR.  0x400000 is the DDR
       # load/run address for the RV1106 SPL (matches CONFIG_SPL_TEXT_BASE).
-      ../rkbin/tools/loaderimage --pack --uboot spl/u-boot-spl.bin $out/SPL 0x400000
+      ./loaderimage --pack --uboot spl/u-boot-spl.bin $out/SPL 0x400000
     fi
 
     # ── Main U-Boot binary ────────────────────────────────────────────────────
