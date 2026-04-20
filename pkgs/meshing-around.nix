@@ -2,12 +2,9 @@
 #
 # Source: https://github.com/SpudGunMan/meshing-around
 #
-# ── Before this builds, fill in the commit hash ───────────────────────────────
-#
-#   Run:  nix-prefetch-github SpudGunMan meshing-around
-#   Then replace MESHING_REV and MESHING_SHA256 below.
-#
-# ─────────────────────────────────────────────────────────────────────────────
+# To update to a newer commit:
+#   nix-prefetch-github SpudGunMan meshing-around
+# then replace MESHING_REV and MESHING_SHA256 below.
 #
 # Packaging notes
 # ───────────────
@@ -18,13 +15,13 @@
 #   2. Collect all Python packages' site-packages into
 #      $out/opt/meshing-around/lib/  (a flat, self-contained directory)
 #   3. Copy the Python interpreter binary itself to $out/bin/python3
-#   4. Write a launcher at $out/bin/meshing-around that sets PYTHONPATH=/opt/…/lib
+#   4. Write a launcher at $out/bin/meshing-around that sets PYTHONPATH
 #
-# When added to `packages = [ localPkgs.meshing-around ]` in configuration.nix,
-# rootfs.nix will merge each $out/ subdirectory into the rootfs:
-#   opt/meshing-around/ → /opt/meshing-around/
-#   bin/python3         → /bin/python3          (skipped if busybox already owns it)
-#   bin/meshing-around  → /bin/meshing-around
+# Omitted optional deps (handled gracefully at runtime if absent):
+#   dadjokes  — not in nixpkgs
+#   mudp      — not in nixpkgs; only needed for UDP transport mode
+#   zeroconf  — only needed for UDP transport mode (mDNS node discovery)
+#   RPIO      — Raspberry Pi GPIO; not applicable here
 
 { pkgs }:
 
@@ -36,19 +33,16 @@ let
 
   python = pkgs.python3;
 
-  # Python packages available in nixpkgs for this project.
-  # dadjokes and some optional deps are not in nixpkgs — skip them; the bot
-  # handles missing optional modules gracefully.
+  # Hard deps from requirements.txt that are available in nixpkgs.
   deps = with python.pkgs; [
     meshtastic      # core: Meshtastic protobuf API + serial/TCP transport
     pypubsub        # pub/sub used by the meshtastic library
     ephem           # pyephem: satellite pass predictions
-    requests        # HTTP (weather, NOAA, Wikipedia)
+    requests        # HTTP (weather, NOAA, etc.)
     geopy           # geocoding (--pos features)
     beautifulsoup4  # HTML scraping for weather pages
     schedule        # cron-style task scheduling
     maidenhead      # ham radio grid-square conversions
-    wikipedia       # Wikipedia article lookups
   ];
 
   # Gather all transitive site-packages into one flat directory so we can
@@ -65,11 +59,11 @@ let
     }
 
     # Direct deps
-    ${lib.concatMapStrings (d: ''copy_sp "${d}"''\n'') deps}
+    ${lib.concatMapStrings (d: "copy_sp \"${d}\"\n") deps}
 
     # Propagated (transitive) deps — one level deep is usually enough
     ${lib.concatMapStrings (d:
-      lib.concatMapStrings (t: ''copy_sp "${t}"''\n'')
+      lib.concatMapStrings (t: "copy_sp \"${t}\"\n")
         (d.propagatedBuildInputs or [])
     ) deps}
   '';
@@ -88,45 +82,38 @@ pkgs.stdenv.mkDerivation {
   };
 
   dontBuild  = true;
-  dontFixup  = true;   # skip strip/patchelf — these are Python scripts + a foreign ELF
+  dontFixup  = true;   # skip strip/patchelf — Python scripts + a foreign ELF
 
   installPhase = ''
-    # ── Application source ───────────────────────────────────────────────────
+    # ── Application source ────────────────────────────────────────────────
     mkdir -p $out/opt/meshing-around
     cp -r . $out/opt/meshing-around/
 
-    # ── Bundled Python packages ───────────────────────────────────────────────
-    # Placed inside the app directory so PYTHONPATH=/opt/meshing-around/lib
-    # is a single, self-contained addition.
+    # ── Bundled Python packages ───────────────────────────────────────────
     mkdir -p $out/opt/meshing-around/lib
     cp -rLT ${bundledLibs} $out/opt/meshing-around/lib/
 
-    # ── Python interpreter ────────────────────────────────────────────────────
+    # ── Python interpreter ────────────────────────────────────────────────
     # Copy the actual ELF binary (not the nixpkgs wrapper script) so it works
     # on the target without the Nix store.
     mkdir -p $out/bin
     pythonBin=$(readlink -f ${python}/bin/python3)
     install -Dm755 "$pythonBin" $out/bin/python3
 
-    # ── Launcher ─────────────────────────────────────────────────────────────
+    # ── Launcher ─────────────────────────────────────────────────────────
     cat > $out/bin/meshing-around << 'LAUNCHER'
 #!/bin/sh
-# meshing-around launcher
-# Config file is read from /etc/meshing-around/config.ini by default;
-# override with MESHING_CONFIG env var or pass --config <path> as an argument.
+# meshing-around launcher — logs to /var/log/meshing-around.log
 export PYTHONPATH=/opt/meshing-around/lib
-exec /bin/python3 /opt/meshing-around/main.py "$@"
+cd /opt/meshing-around
+exec /bin/python3 mesh_bot.py "$@"
 LAUNCHER
     chmod +x $out/bin/meshing-around
 
-    # ── Default config template ───────────────────────────────────────────────
-    # Copied to /etc/meshing-around/ in the rootfs.  Edit before flashing.
+    # ── Default config template ───────────────────────────────────────────
+    # Installed to /etc/meshing-around/config.ini — edit before flashing.
     mkdir -p $out/etc/meshing-around
-    if [ -f app/config.template ]; then
-      cp app/config.template $out/etc/meshing-around/config.ini
-    elif [ -f config.template ]; then
-      cp config.template $out/etc/meshing-around/config.ini
-    fi
+    cp config.template $out/etc/meshing-around/config.ini
   '';
 
   meta = {
