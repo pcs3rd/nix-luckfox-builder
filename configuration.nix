@@ -1,8 +1,8 @@
-{ pkgs, ... }:
+{ ... }:
 
 {
   imports = [
-    ./hardware/pico-mini-b.nix
+    ../hardware/pico-mini-b.nix
   ];
 
   services.ssh.enable = true;
@@ -10,10 +10,14 @@
 
   networking = {
     dhcp.enable = true;
-    interface = "eth0";
     hostname = "luckfox";
   };
 
-  boot.uboot.enable = true;
+  boot.uboot = {
+    enable = true;
+    spl = ../uboot/SPL;
+    package = ../uboot/u-boot.bin;
+  };
+
   rockchip.enable = true;
 }
