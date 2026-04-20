@@ -42,7 +42,7 @@ let
     geopy           # geocoding (--pos features)
     beautifulsoup4  # HTML scraping for weather pages
     schedule        # cron-style task scheduling
-    maidenhead      # ham radio grid-square conversions
+    # maidenhead — not in nixpkgs; grid-square features degrade gracefully
   ];
 
   # Gather all transitive site-packages into one flat directory so we can
