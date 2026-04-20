@@ -9,8 +9,13 @@
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox $out/bin/
     chmod +x $out/bin/busybox
 
-    for cmd in sh ls cat echo mount umount mdev login; do
-      ln -s /bin/busybox $out/bin/$cmd
+    # Symlink every applet that this busybox build was compiled with.
+    # nixpkgs' busybox package already creates one symlink per applet in its
+    # own bin/, so iterating those is more reliable than a hardcoded list.
+    for f in ${pkgs.pkgsStatic.busybox}/bin/*; do
+      name=$(basename "$f")
+      [ "$name" = "busybox" ] && continue
+      ln -sf /bin/busybox "$out/bin/$name"
     done
 
     # busybox init lives at sbin/init
