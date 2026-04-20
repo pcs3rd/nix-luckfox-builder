@@ -25,8 +25,11 @@ pkgs.pkgsStatic.stdenv.mkDerivation rec {
   ];
 
   postInstall = ''
-    mkdir -p $out/usr/share
-    cp -r ${pkgs.ncurses}/share/terminfo $out/usr/share/terminfo
+    mkdir -p $out/etc/terminfo/v
+    mkdir -p $out/etc/terminfo/l
+
+    cp ${pkgs.ncurses}/share/terminfo/v/vt100 $out/etc/terminfo/v/
+    cp ${pkgs.ncurses}/share/terminfo/l/linux $out/etc/terminfo/l/
   '';
 
   meta = with pkgs.lib; {
