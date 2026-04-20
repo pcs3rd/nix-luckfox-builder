@@ -17,8 +17,7 @@ lib.evalModules {
     ../modules/core/rockchip.nix
     ../modules/core/firmware.nix
     ../modules/core/sdimage.nix
-    ../modules/services/ssh.nix
-    ../modules/services/getty.nix
+    ../modules/services/default.nix
     ../modules/networking/dhcp.nix
   ];
 }

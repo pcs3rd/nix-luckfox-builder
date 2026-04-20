@@ -16,6 +16,7 @@ in
     meshing-around
     ];
 
+  services.user.meshing-around.enable = true;   # ← add this
   services.ssh.enable = true;
   services.getty.enable = true;
 

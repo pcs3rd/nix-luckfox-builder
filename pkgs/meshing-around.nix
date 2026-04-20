@@ -31,8 +31,8 @@
 let
   lib = pkgs.lib;
 
-  MESHING_REV    = "REPLACE_WITH_COMMIT_HASH";
-  MESHING_SHA256 = lib.fakeHash;
+  MESHING_REV    = "9fe580a3cbd35c6b6f31f82bfa1c6b6a666e47c8";
+  MESHING_SHA256 = "sha256-Rm6Mi5yNsJ6K8jig/v1cP8BwKiWBznkAk3sGdx0xIlc=";
 
   python = pkgs.python3;
 

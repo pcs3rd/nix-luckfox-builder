@@ -1,17 +1,33 @@
-# WIP — mesh networking service (meshing-around)
+# meshing-around service — Meshtastic BBS bot
 #
-# This is a placeholder. Wire it in once the meshing-around script/binary
-# is available in the rootfs (add it to rootfs.nix or an overlay).
+# Requires the meshing-around package in your packages list:
 #
-# To enable, add a `services.meshing-around.enable` option to options.nix
-# and uncomment the block below in your configuration.nix.
+#   packages = with localPkgs; [ meshing-around ];
+#
+# To enable, import this file and set the option:
+#
+#   imports = [
+#     ./hardware/pico-mini-b.nix
+#     ./modules/services/meshing-around.service
+#   ];
+#
+#   services.user.meshing-around.enable = true;
+#
+# Edit the config before flashing:
+#   /etc/meshing-around/config.ini
+#
+# Logs are written to /var/log/meshing-around.log
 
-{ lib, config, ... }:
+{ ... }:
 
 {
-  # config.services.definitions.meshing-around =
-  #   lib.mkIf config.services.meshing-around.enable {
-  #     enable = true;
-  #     run    = ''exec python /opt/meshing-around/main.py'';
-  #   };
+  services.user.meshing-around = {
+    enable = false;   # set to true in your configuration.nix to start the bot
+    action = "respawn";
+    script = ''
+      LOG=/var/log/meshing-around.log
+      echo "$(date): starting meshing-around" >> "$LOG"
+      exec /bin/meshing-around >> "$LOG" 2>&1
+    '';
+  };
 }
