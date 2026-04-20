@@ -7,6 +7,10 @@ with lib;
     services = {
       ssh.enable = mkEnableOption "ssh";
 
+      "meshing-around" = {
+        enable = mkEnableOption "meshing-around Meshtastic BBS bot";
+      };
+
       getty = {
         enable = mkEnableOption "getty";
         tty = mkOption {

@@ -14,7 +14,7 @@
   imports = [
     ./ssh.nix
     ./getty.nix
-    ./meshing-around.service
+    ./meshing-around.nix
     ./hello.nix
   ];
 }

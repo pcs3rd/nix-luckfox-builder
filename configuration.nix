@@ -10,12 +10,13 @@ in
   ];
 
   # Extra packages — add your own derivations from pkgs/ here.
-  packages = with localPkgs; [ 
+  packages = with localPkgs; [
     sysinfo
-    htop 
-    ];
+    htop
+    meshing-around
+  ];
 
-  services.user.meshing-around.enable = true;
+  services."meshing-around".enable = true;
   services.ssh.enable = true;
   services.getty.enable = true;
 
