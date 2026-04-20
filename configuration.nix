@@ -1,8 +1,12 @@
-{ ... }:
+{ pkgs, ... }:
+
+let
+  uboot = import ./pkgs/uboot.nix { inherit pkgs; };
+in
 
 {
   imports = [
-    ../hardware/pico-mini-b.nix
+    ./hardware/pico-mini-b.nix
   ];
 
   services.ssh.enable = true;
@@ -14,9 +18,9 @@
   };
 
   boot.uboot = {
-    enable = true;
-    spl = ../uboot/SPL;
-    package = ../uboot/u-boot.bin;
+    enable  = true;
+    spl     = "${uboot}/SPL";
+    package = "${uboot}/u-boot.bin";
   };
 
   rockchip.enable = true;

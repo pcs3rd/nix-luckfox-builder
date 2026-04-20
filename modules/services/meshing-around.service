@@ -1,14 +1,17 @@
+# WIP — mesh networking service (meshing-around)
+#
+# This is a placeholder. Wire it in once the meshing-around script/binary
+# is available in the rootfs (add it to rootfs.nix or an overlay).
+#
+# To enable, add a `services.meshing-around.enable` option to options.nix
+# and uncomment the block below in your configuration.nix.
 
-# WIP
-{ lib, config, pkgs, ... }:
+{ lib, config, ... }:
 
 {
-  config.services.definitions.ssh = lib.mkIf config.services.ssh.enable {
-    enable = true;
-    run = ''exec python -R -F'';
-  };
-
-  config.system.build.rootfs = pkgs.runCommand "rootfs-ssh" {} ''
-    cp -r ${config.system.build.rootfs} $out
-  '';
+  # config.services.definitions.meshing-around =
+  #   lib.mkIf config.services.meshing-around.enable {
+  #     enable = true;
+  #     run    = ''exec python /opt/meshing-around/main.py'';
+  #   };
 }

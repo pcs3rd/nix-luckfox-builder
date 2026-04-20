@@ -15,6 +15,8 @@ lib.evalModules {
     ../modules/core/uboot.nix
     ../modules/core/image.nix
     ../modules/core/rockchip.nix
+    ../modules/core/firmware.nix
+    ../modules/core/sdimage.nix
     ../modules/services/ssh.nix
     ../modules/services/getty.nix
     ../modules/networking/dhcp.nix

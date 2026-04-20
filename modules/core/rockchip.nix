@@ -23,7 +23,7 @@ ATAG: 0x00200800
 MACHINE: 0
 CHECK_MASK: 0x80
 PWR_HLD: 0,0,A,0,1
-CMDLINE: console=ttyS0 root=/dev/mmcblk0p1 rw rootfstype=ext4
+CMDLINE: ${config.boot.cmdline}
 EOF
 
       echo "Creating loader placeholders"

@@ -1,9 +1,8 @@
-
 { lib, config, ... }:
 
 {
   config.services.definitions.getty = lib.mkIf config.services.getty.enable {
     enable = true;
-    run = ''exec getty -L ttyS0 115200 vt100'';
+    run    = ''exec getty -L ${config.services.getty.tty} ${toString config.services.getty.baud} vt100'';
   };
 }

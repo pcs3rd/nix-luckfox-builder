@@ -1,8 +1,8 @@
-{ pkgs, config, ... }:
+{ pkgs, config, lib, ... }:
 
 {
   config.system.build.image = pkgs.runCommand "sd.img" {
-    buildInputs = [ pkgs.parted pkgs.e2fsprogs pkgs.utillinux ];
+    buildInputs = [ pkgs.parted pkgs.e2fsprogs pkgs.util-linux ];
   } ''
     IMG=$out
     dd if=/dev/zero of=$IMG bs=1M count=${toString config.system.imageSize}
@@ -19,14 +19,20 @@
     mount $PART mnt
 
     cp -r ${config.system.build.rootfs}/* mnt/
-    cp ${config.device.kernel} mnt/zImage
-    cp ${config.device.dtb} mnt/${config.device.name}.dtb
+
+    ${lib.optionalString (config.device.kernel != null) ''
+      cp ${config.device.kernel} mnt/zImage
+    ''}
+
+    ${lib.optionalString (config.device.dtb != null) ''
+      cp ${config.device.dtb} mnt/${config.device.name}.dtb
+    ''}
 
     mkdir -p mnt/extlinux
     cat > mnt/extlinux/extlinux.conf << EOF
 LABEL linux
   KERNEL /zImage
-  FDT /${config.device.name}.dtb
+  ${lib.optionalString (config.device.dtb != null) "FDT /${config.device.name}.dtb"}
   APPEND ${config.boot.cmdline}
 EOF
 
