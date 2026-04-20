@@ -9,7 +9,7 @@
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox $out/bin/
     chmod +x $out/bin/busybox
 
-    for cmd in sh ls cat echo mount umount mdev; do
+    for cmd in sh ls cat echo mount umount mdev login; do
       ln -s /bin/busybox $out/bin/$cmd
     done
 
@@ -36,6 +36,23 @@
       mkdir -p $out/etc/dropbear
       cp ${pkgs.pkgsStatic.dropbear}/bin/dropbear $out/bin/
       chmod +x $out/bin/dropbear
+    ''}
+
+    # ── Service launcher wrappers (redirect output to /var/log) ───────────
+    ${lib.optionalString config.networking.dhcp.enable ''
+      cat > $out/sbin/start-dhcp << 'DHCP_EOF'
+#!/bin/sh
+exec /bin/busybox udhcpc -i ${config.networking.interface} -T 3 -t 3 -A 3 >> /var/log/udhcpc.log 2>&1
+DHCP_EOF
+      chmod +x $out/sbin/start-dhcp
+    ''}
+
+    ${lib.optionalString config.services.ssh.enable ''
+      cat > $out/sbin/start-dropbear << 'SSH_EOF'
+#!/bin/sh
+exec /bin/dropbear -R -F >> /var/log/dropbear.log 2>&1
+SSH_EOF
+      chmod +x $out/sbin/start-dropbear
     ''}
 
     # ── Self-expanding rootfs tools ────────────────────────────────────────
@@ -104,9 +121,9 @@ ${lib.optionalString config.system.sdExpand.enable
 ${lib.optionalString config.services.getty.enable
   "${config.services.getty.tty}::respawn:/bin/busybox getty -L ${config.services.getty.tty} ${toString config.services.getty.baud} vt100"}
 ${lib.optionalString config.services.ssh.enable
-  "::respawn:/bin/dropbear -R -F"}
+  "::respawn:/sbin/start-dropbear"}
 ${lib.optionalString config.networking.dhcp.enable
-  "::once:/bin/busybox udhcpc -i ${config.networking.interface} -T 3 -t 3 -A 3"}
+  "::once:/sbin/start-dhcp"}
 ::ctrlaltdel:/bin/busybox reboot
 EOF
 
