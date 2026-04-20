@@ -24,7 +24,7 @@ in
   boot.uboot = {
     enable  = true;
     spl     = "${uboot}/SPL";
-    package = "${uboot}/u-boot.bin";
+    package = "${uboot}/u-boot.img";   # Rockchip build produces u-boot.img (FIT image)
   };
 
   rockchip.enable = true;

@@ -3,7 +3,7 @@
 {
   # ── Root filesystem directory ───────────────────────────────────────────────
   config.system.build.rootfs = pkgs.runCommand "rootfs" {} ''
-    mkdir -p $out/{bin,sbin,etc,proc,sys,dev,root,lib,var/log}
+    mkdir -p $out/{bin,sbin,etc,proc,sys,dev,root,lib,var/log,mnt,newroot}
 
     # ── busybox ────────────────────────────────────────────────────────────
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox $out/bin/
@@ -53,6 +53,102 @@ DHCP_EOF
 exec /bin/dropbear -R -F >> /var/log/dropbear.log 2>&1
 SSH_EOF
       chmod +x $out/sbin/start-dropbear
+    ''}
+
+    # ── SD overlay tools and init script ──────────────────────────────────
+    ${lib.optionalString config.system.sdOverlay.enable ''
+      # Tools needed by init-overlay
+      cp $(find ${pkgs.e2fsprogs}   -name mkfs.ext4  -type f | head -1) $out/sbin/
+      cp $(find ${pkgs.util-linux}  -name sfdisk     -type f | head -1) $out/sbin/
+      cp $(find ${pkgs.util-linux}  -name blkid      -type f | head -1) $out/sbin/
+      cp $(find ${pkgs.util-linux}  -name blockdev   -type f | head -1) $out/sbin/
+      chmod +x $out/sbin/mkfs.ext4 $out/sbin/sfdisk $out/sbin/blkid $out/sbin/blockdev
+
+      # pivot_root BusyBox applet
+      ln -sf /bin/busybox $out/bin/pivot_root
+
+      cat > $out/sbin/init-overlay << 'OVERLAY_EOF'
+#!/bin/sh
+#
+# init-overlay — kernel init= entry point for sdimage overlay builds.
+#
+# First boot:  creates a partition from the unpartitioned space after the
+#              rootfs, formats it ext4, and uses it as the overlay upper dir.
+# Every boot:  mounts the overlay partition and overlays it on top of the
+#              (read-only) rootfs, then execs the real init.
+# Fallback:    if anything fails, boots normally without overlay.
+#
+
+DISK=/dev/mmcblk0
+OVERLAY_PART=${config.system.sdOverlay.device}
+
+# ── Basic filesystems ──────────────────────────────────────────────────────
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+/bin/busybox mdev -s 2>/dev/null || true
+
+# ── Overlay setup (runs in a subshell so errors fall through to the exec) ──
+setup_overlay() {
+  # ── Create overlay partition if this is first boot ───────────────────────
+  if ! [ -b "$OVERLAY_PART" ]; then
+    echo "init-overlay: first boot — creating overlay partition..."
+
+    P1_START=$(cat /sys/block/mmcblk0/mmcblk0p1/start)
+    P1_SIZE=$( cat /sys/block/mmcblk0/mmcblk0p1/size)
+    P2_START=$(( P1_START + P1_SIZE ))
+
+    # Append partition 2 starting right after partition 1 and filling the card.
+    # sfdisk without --no-reread will issue BLKRRPART to reload the table.
+    printf '%d,+\n' "$P2_START" | \
+      /sbin/sfdisk --force --append "$DISK" || return 1
+
+    # Wait up to 5 s for the device node to materialise
+    i=0
+    while [ "$i" -lt 50 ] && ! [ -b "$OVERLAY_PART" ]; do
+      sleep 0.1; i=$(( i + 1 ))
+    done
+    [ -b "$OVERLAY_PART" ] || return 1
+  fi
+
+  # ── Format on first use ──────────────────────────────────────────────────
+  if ! /sbin/blkid -t TYPE=ext4 "$OVERLAY_PART" > /dev/null 2>&1; then
+    echo "init-overlay: formatting $OVERLAY_PART as ext4..."
+    /sbin/mkfs.ext4 -q -L overlay "$OVERLAY_PART" || return 1
+  fi
+
+  # ── Mount overlay storage ────────────────────────────────────────────────
+  mount "$OVERLAY_PART" /mnt || return 1
+  mkdir -p /mnt/upper /mnt/work
+
+  # ── Mount overlayfs (lower = current ro rootfs) ──────────────────────────
+  mount -t overlay overlay \
+    -o lowerdir=/,upperdir=/mnt/upper,workdir=/mnt/work \
+    /newroot || return 1
+
+  # ── Move pseudo-filesystems into new root ────────────────────────────────
+  mount --move /proc   /newroot/proc
+  mount --move /sys    /newroot/sys
+  mount --move /dev    /newroot/dev
+
+  # ── Pivot into the overlay ────────────────────────────────────────────────
+  # After pivot_root . mnt:
+  #   /          = overlay (writes go to userdata partition)
+  #   /mnt       = original read-only ext4 rootfs
+  #   /mnt/mnt   = overlay partition (the upper/work dirs are here)
+  cd /newroot
+  pivot_root . mnt
+}
+
+if setup_overlay; then
+  echo "init-overlay: overlay active."
+else
+  echo "init-overlay: overlay setup failed — booting without overlay." >&2
+fi
+
+exec /sbin/init
+OVERLAY_EOF
+      chmod +x $out/sbin/init-overlay
     ''}
 
     # ── Self-expanding rootfs tools ────────────────────────────────────────

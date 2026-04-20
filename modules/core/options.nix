@@ -74,6 +74,20 @@ with lib;
       sdExpand = {
         enable = mkEnableOption "self-expanding root filesystem on first boot";
       };
+
+      sdOverlay = {
+        enable = mkEnableOption ''
+          overlayfs using the SD card's free space instead of expanding the rootfs.
+          On first boot a second partition is created from the unpartitioned space
+          after the rootfs and formatted as ext4.  All writes go to this overlay
+          partition; the rootfs partition is never modified.
+        '';
+        device = mkOption {
+          type    = types.str;
+          default = "/dev/mmcblk0p2";
+          description = "Block device that holds the overlay upper/work dirs (created on first boot).";
+        };
+      };
     };
 
     services.user = mkOption {
