@@ -236,6 +236,10 @@ EXPAND_EOF
               fi
             done
             ;;
+          nix-support|newroot)
+            # nix-support: Nix build metadata — never needed at runtime.
+            # newroot:     overlay pivot staging dir — owned by the rootfs, not packages.
+            ;;
           *)
             # Merge the directory tree into the rootfs.
             # -rL follows symlinks so store symlinks become real files.
