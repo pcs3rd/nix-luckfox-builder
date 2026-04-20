@@ -81,10 +81,13 @@ pkgs.stdenv.mkDerivation {
     # Modern GCC exceeds the 0x28000 (160 KB) SPL_MAX_SIZE limit.  Disable
     # SPL features that are only needed for SPI-NOR/NAND boot paths — the
     # Luckfox Pico Mini B uses SD card exclusively.
-    ./scripts/config --disable SPL_SPI_SUPPORT
-    ./scripts/config --disable SPL_SPI_FLASH_SUPPORT
-    ./scripts/config --disable SPL_MTD_SUPPORT
-    ./scripts/config --disable MTD_SPI_NAND
+    disable_config() {
+      sed -i "s/^$1=y/# $1 is not set/" .config
+    }
+    disable_config CONFIG_SPL_SPI_SUPPORT
+    disable_config CONFIG_SPL_SPI_FLASH_SUPPORT
+    disable_config CONFIG_SPL_MTD_SUPPORT
+    disable_config CONFIG_MTD_SPI_NAND
 
     # Recalculate Kconfig dependencies after the above changes.
     make \
