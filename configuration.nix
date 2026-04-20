@@ -11,7 +11,7 @@ in
   ];
 
   # Extra packages — add your own derivations from pkgs/ here.
-  packages = [ sysinfo htop];
+  packages = [ sysinfo ];
 
   services.ssh.enable = true;
   services.getty.enable = true;
