@@ -76,6 +76,23 @@ pkgs.stdenv.mkDerivation {
       HOSTCC=${hostCC} \
       luckfox_rv1106_uboot_defconfig
 
+    # ── Trim SPL size for modern GCC ─────────────────────────────────────────
+    # The SDK was built with Linaro GCC 6.3.1 which generates smaller code.
+    # Modern GCC exceeds the 0x28000 (160 KB) SPL_MAX_SIZE limit.  Disable
+    # SPL features that are only needed for SPI-NOR/NAND boot paths — the
+    # Luckfox Pico Mini B uses SD card exclusively.
+    ./scripts/config --disable SPL_SPI_SUPPORT
+    ./scripts/config --disable SPL_SPI_FLASH_SUPPORT
+    ./scripts/config --disable SPL_MTD_SUPPORT
+    ./scripts/config --disable MTD_SPI_NAND
+
+    # Recalculate Kconfig dependencies after the above changes.
+    make \
+      ARCH=arm \
+      CROSS_COMPILE=${crossCompile} \
+      HOSTCC=${hostCC} \
+      olddefconfig
+
     # The DDR init blob is in the same repo under sysdrv/source/uboot/rkbin/.
     # From sourceRoot (sysdrv/source/uboot/u-boot) it's one level up at ../rkbin/.
     cp ../rkbin/bin/rv11/rv1106_ddr_924MHz_v1.15.bin ./rv1106_ddr.bin
