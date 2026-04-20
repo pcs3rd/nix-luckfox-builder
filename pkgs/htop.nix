@@ -1,7 +1,7 @@
 # Example custom package: a small static C utility that prints system info.
 
 
-{ lib, stdenv, fetchFromGitHub, ncurses, pkg-config, autoreconfHook }:
+{ pkgs, lib, stdenv, fetchFromGitHub, ncurses, pkg-config, autoreconfHook }:
 
 pkgs.pkgsStatic.stdenv.mkDerivation {
   pname   = "htop";
