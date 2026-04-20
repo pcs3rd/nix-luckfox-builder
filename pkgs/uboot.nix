@@ -84,9 +84,12 @@ pkgs.stdenv.mkDerivation {
     disable_config() {
       sed -i "s/^$1=y/# $1 is not set/" .config
     }
+    # SPI bus and flash drivers are not needed for SD-card-only boot.
+    # SPL_MTD_SUPPORT must stay — spl_fit.c calls mtd_blk_map_fit().
     disable_config CONFIG_SPL_SPI_SUPPORT
     disable_config CONFIG_SPL_SPI_FLASH_SUPPORT
-    disable_config CONFIG_SPL_MTD_SUPPORT
+    # A/B partition switching adds code not needed for simple SD boot.
+    disable_config CONFIG_SPL_AB
 
     # Recalculate Kconfig dependencies after the above changes.
     make \
