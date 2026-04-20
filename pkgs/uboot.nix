@@ -59,6 +59,7 @@ pkgs.stdenv.mkDerivation {
     python3
     swig
     pkg-config
+    bc          # scripts/Makefile.spl uses bc to compute SPL pad size
   ];
 
   configurePhase = ''
