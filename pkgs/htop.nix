@@ -23,7 +23,7 @@ pkgs.pkgsStatic.stdenv.mkDerivation rec {
   configureFlags = [
     "--enable-unicode"
     "--disable-database"
-    "--with-fallbacks=vt100"                                               
+    "--with-fallbacks=vt100,linux"                                               
                                                           
 
   ];
