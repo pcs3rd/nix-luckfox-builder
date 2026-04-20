@@ -1,13 +1,17 @@
 { pkgs, ... }:
 
 let
-  uboot = import ./pkgs/uboot.nix { inherit pkgs; };
+  uboot   = import ./pkgs/uboot.nix   { inherit pkgs; };
+  sysinfo = import ./pkgs/sysinfo.nix { inherit pkgs; };
 in
 
 {
   imports = [
     ./hardware/pico-mini-b.nix
   ];
+
+  # Extra packages — add your own derivations from pkgs/ here.
+  packages = [ sysinfo ];
 
   services.ssh.enable = true;
   services.getty.enable = true;

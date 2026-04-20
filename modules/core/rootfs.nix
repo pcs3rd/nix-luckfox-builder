@@ -107,6 +107,39 @@ EXPAND_EOF
       chmod +x $out/sbin/expand-rootfs
     ''}
 
+    # ── User-defined services ──────────────────────────────────────────────
+    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: svc:
+      lib.optionalString svc.enable ''
+        cp ${pkgs.writeScript "svc-${name}" ''
+          #!/bin/sh
+          ${svc.script}
+        ''} $out/sbin/svc-${name}
+        chmod +x $out/sbin/svc-${name}
+      ''
+    ) config.services.user)}
+
+    # ── Extra packages ─────────────────────────────────────────────────────
+    ${lib.concatMapStrings (pkg: ''
+      for dir in bin sbin; do
+        if [ -d "${pkg}/$dir" ]; then
+          for f in "${pkg}/$dir/"*; do
+            [ -e "$f" ] || continue
+            name=$(basename "$f")
+            # Don't overwrite busybox applet symlinks already in place
+            if [ ! -e "$out/bin/$name" ] && [ ! -e "$out/sbin/$name" ]; then
+              cp -L "$f" "$out/$dir/$name"
+              chmod +x "$out/$dir/$name"
+            fi
+          done
+        fi
+      done
+      # Copy shared libraries if present (needed for dynamic binaries)
+      if [ -d "${pkg}/lib" ]; then
+        mkdir -p $out/lib
+        cp -rL "${pkg}/lib/"* $out/lib/ 2>/dev/null || true
+      fi
+    '') config.packages}
+
     # ── inittab ────────────────────────────────────────────────────────────
     cat > $out/etc/inittab << 'EOF'
 # Mount devtmpfs first — this populates /dev/null, /dev/console,
@@ -124,6 +157,9 @@ ${lib.optionalString config.services.ssh.enable
   "::respawn:/sbin/start-dropbear"}
 ${lib.optionalString config.networking.dhcp.enable
   "::once:/sbin/start-dhcp"}
+${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: svc:
+  lib.optionalString svc.enable "::${svc.action}:/sbin/svc-${name}"
+) config.services.user)}
 ::ctrlaltdel:/bin/busybox reboot
 EOF
 

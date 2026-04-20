@@ -76,6 +76,42 @@ with lib;
       };
     };
 
+    services.user = mkOption {
+      type = types.attrsOf (types.submodule {
+        options = {
+          enable = mkEnableOption "this service";
+          script = mkOption {
+            type        = types.lines;
+            description = "Shell script body for the service (shebang is added automatically).";
+          };
+          action = mkOption {
+            type    = types.enum [ "respawn" "once" "sysinit" "wait" "askfirst" ];
+            default = "respawn";
+            description = ''
+              busybox init action type.
+                respawn  — restart the process when it exits (long-running daemons).
+                once     — run once, do not restart.
+                sysinit  — run during early init, block until finished.
+                wait     — run once, block until finished (after sysinit).
+            '';
+          };
+        };
+      });
+      default     = {};
+      description = "User-defined services written as shell scripts and wired into inittab.";
+    };
+
+    packages = mkOption {
+      type        = types.listOf types.package;
+      default     = [];
+      description = ''
+        Extra packages to include in the rootfs.
+        Binaries from each package's bin/ and sbin/ are copied into /bin and /sbin.
+        Prefer pkgs.pkgsStatic.foo — static binaries are self-contained and need
+        no dynamic linker.  Dynamic binaries require their shared libraries too.
+      '';
+    };
+
     users = {
       root = {
         hashedPassword = lib.mkOption {
