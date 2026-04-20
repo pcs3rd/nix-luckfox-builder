@@ -138,7 +138,9 @@ nobody:x:65534:65534:nobody:/:/bin/false
 PASSWD_EOF
 
     # shadow: root hash set at build time via users.root.hashedPassword
-    printf 'root:%s:1:0:99999:7:::\n' "${config.users.root.hashedPassword}" \
+    # lib.escapeShellArg wraps the hash in single quotes so the shell does
+    # not expand the $ signs inside the crypt hash string.
+    printf 'root:%s:1:0:99999:7:::\n' ${lib.escapeShellArg config.users.root.hashedPassword} \
       > $out/etc/shadow
     chmod 640 $out/etc/shadow
 
