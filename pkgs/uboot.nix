@@ -58,7 +58,7 @@ pkgs.stdenv.mkDerivation {
       ARCH=arm \
       CROSS_COMPILE=arm-linux-gnueabihf- \
       HOSTCC=${hostCC} \
-      luckfox_rv1106_uboot_defconfig
+      rv1106_defconfig
 
     # The DDR init blob is in the same repo under sysdrv/source/uboot/rkbin/.
     # From sourceRoot (sysdrv/source/uboot/u-boot) it's one level up at ../rkbin/.
