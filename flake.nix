@@ -62,7 +62,7 @@
       qemu-test = hostPkgs.writeShellApplication {
         name = "qemu-test-luckfox";
 
-        runtimeInputs = [ hostPkgs.qemu ];
+        runtimeInputs = [ hostPkgs.qemu hostPkgs.python3 ];
 
         text = ''
           # Pick a free ephemeral port for SSH forwarding so we never
