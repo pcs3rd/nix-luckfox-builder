@@ -11,3 +11,7 @@
 - Mode A U-Boot (vendor blobs)
 - Rockchip NAND/eMMC layout generator
 - NixOS-style module system
+
+Test in Qemu:
+nix build .#qemu-test
+
