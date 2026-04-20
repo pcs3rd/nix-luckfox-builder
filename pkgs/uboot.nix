@@ -87,7 +87,6 @@ pkgs.stdenv.mkDerivation {
     disable_config CONFIG_SPL_SPI_SUPPORT
     disable_config CONFIG_SPL_SPI_FLASH_SUPPORT
     disable_config CONFIG_SPL_MTD_SUPPORT
-    disable_config CONFIG_MTD_SPI_NAND
 
     # Recalculate Kconfig dependencies after the above changes.
     make \
