@@ -13,10 +13,9 @@ in
   packages = with localPkgs; [ 
     sysinfo
     htop 
-    meshing-around
     ];
 
-  services.user.meshing-around.enable = true;   # ← add this
+  services.user.meshing-around.enable = true;
   services.ssh.enable = true;
   services.getty.enable = true;
 
