@@ -21,10 +21,19 @@ let
   LUCKFOX_REV    = "438d5270a38c59a74f142dfa31ffbf51b096ce72";
   LUCKFOX_SHA256 = "sha256-iPmQLKzgznBp3CJMvbbGrtLgd9P0jHgBrynqGnsAygI=";
 
-  # In a cross-compilation stdenv, Nix gcc wrappers may not be available as a
-  # bare "gcc" on PATH.  Pin HOSTCC directly to the store path so U-Boot's
-  # scripts/Makefile.host can always find the host C compiler.
-  hostCC = "${pkgs.buildPackages.stdenv.cc}/bin/gcc";
+  # ── Compiler paths ─────────────────────────────────────────────────────────
+  #
+  # In a Nix cross-compilation stdenv, the cross-compiler is not available as
+  # "arm-linux-gnueabihf-gcc" on PATH.  Instead it lives at a store path with
+  # the Nix target-triplet prefix (armv7l-unknown-linux-musleabihf-).
+  # Pin both CROSS_COMPILE and HOSTCC to exact store paths so U-Boot's
+  # Makefiles can always find them regardless of PATH.
+  #
+  # pkgs.stdenv.cc           — cross-compiler wrapper (target = armv7l musl)
+  # pkgs.stdenv.cc.targetPrefix — "armv7l-unknown-linux-musleabihf-"
+  # pkgs.buildPackages.stdenv.cc — native compiler wrapper (build machine)
+  crossCompile = "${pkgs.stdenv.cc}/bin/${pkgs.stdenv.cc.targetPrefix}";
+  hostCC       = "${pkgs.buildPackages.stdenv.cc}/bin/gcc";
 
 in
 
@@ -44,7 +53,6 @@ pkgs.stdenv.mkDerivation {
 
   nativeBuildInputs = with pkgs.buildPackages; [
     gnumake
-    stdenv.cc   # provides the host C compiler at the store path used by hostCC
     bison
     flex
     openssl
@@ -56,7 +64,7 @@ pkgs.stdenv.mkDerivation {
   configurePhase = ''
     make \
       ARCH=arm \
-      CROSS_COMPILE=arm-linux-gnueabihf- \
+      CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
       rv1106_defconfig
 
@@ -68,7 +76,7 @@ pkgs.stdenv.mkDerivation {
   buildPhase = ''
     make -j$NIX_BUILD_CORES \
       ARCH=arm \
-      CROSS_COMPILE=arm-linux-gnueabihf- \
+      CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC}
   '';
 
