@@ -14,7 +14,7 @@
 
 {
   services.user.hello = {
-    enable = true;
+    enable = pkgs.lib.mkDefault false;
     action = "once";           # run once at boot, do not restart
     script = ''
       LOG=/var/log/hello.log

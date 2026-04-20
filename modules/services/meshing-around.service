@@ -22,7 +22,7 @@
 
 {
   services.user.meshing-around = {
-    enable = false;   # set to true in your configuration.nix to start the bot
+    enable = pkgs.lib.mkDefault false;   # set to true in your configuration.nix to start the bot
     action = "respawn";
     script = ''
       LOG=/var/log/meshing-around.log
