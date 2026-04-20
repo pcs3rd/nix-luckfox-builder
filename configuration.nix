@@ -13,7 +13,6 @@ in
   packages = with localPkgs; [
     sysinfo
     htop
-    meshing-around
   ];
 
   services."meshing-around".enable = true;
