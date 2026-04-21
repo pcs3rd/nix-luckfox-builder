@@ -63,7 +63,7 @@ in
 
           # Tear down any leftover gadget from a previous boot so we start clean.
           if [ -d "$GADGET" ]; then
-            printf '' > "$GADGET/UDC" 2>/dev/null || true
+            echo > "$GADGET/UDC" 2>/dev/null || true
             for lnk in "$GADGET"/configs/c.1/*; do
               [ -L "$lnk" ] && rm -f "$lnk"
             done
