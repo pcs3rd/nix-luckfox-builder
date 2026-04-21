@@ -23,6 +23,7 @@ in
   # device.kernelModulesPath = "${localPkgs.luckfox-kernel-modules}/lib/modules";
   # Compressed RAM swap — gives ~96 MB of effective swap on a 64 MB board.
   # lz4 is fast enough that even a Cortex-A7 barely notices the overhead.
+  
   system.zram = {
     enable    = true;
     size      = "32M";
@@ -30,7 +31,7 @@ in
   };
 
   services.nrfnet = {
-    enable    = false;
+    enable    = true;
     role      = "primary";      # or "secondary"
     spiDevice = "/dev/spidev0.0";
     channel   = 42;
