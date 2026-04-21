@@ -36,10 +36,20 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
     pkg-config
   ];
 
+  # RF24's CMakeLists.txt uses add_library(rf24 SHARED …) even when
+  # BUILD_SHARED_LIBS=OFF is set via a cmake flag, because the flag is
+  # evaluated after the library target is declared.  Patch the source so
+  # the target is always STATIC — required for the musl ARM32 static build
+  # where C++ RTTI relocations in libstdc++.a are unsupported.
+  postPatch = ''
+    sed -i 's/add_library(\s*rf24\s*SHARED/add_library(rf24 STATIC/g' CMakeLists.txt
+  '';
+
   cmakeFlags = [
     # Use the Linux SPIDEV driver — no WiringPi / pigpio / mraa dependency.
     "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
     "-DRF24_DRIVER=SPIDEV"
+    "-DBUILD_SHARED_LIBS=OFF"
   ];
 
   meta = {
