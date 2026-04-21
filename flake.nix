@@ -67,10 +67,11 @@
       mkSystemRv = import ./lib/mkSystem.nix { pkgs = pkgsRv64; lib = pkgsRv64.lib; };
 
       # ── System evaluations ──────────────────────────────────────────────────
-      picoMiniB         = mkSystem   { configuration = ./configuration.nix;          };
-      picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix; };
-      picoMiniB-vm      = mkSystem   { configuration = ./configurations/qemu-vm.nix;   };
-      picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;   };
+      picoMiniB         = mkSystem   { configuration = ./configuration.nix;             };
+      picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix;  };
+      picoMiniB-vm      = mkSystem   { configuration = ./configurations/qemu-vm.nix;    };
+      picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;    };
+      picoMiniB-ab      = mkSystem   { configuration = ./configurations/sdimage-ab.nix; };
 
       # Pine64 Ox64 — RISC-V 64-bit (BL808 C906 core)
       # Build: nix build .#packages.<system>.ox64
@@ -290,6 +291,14 @@ RUNEOF
         uboot             = picoMiniB.config.system.build.uboot;
         sdImage           = picoMiniB.config.system.build.image;
         sdImage-flashable = picoMiniB-sdimage.config.system.build.sdImage;
+
+        # A/B rootfs outputs (zero-downtime SSH upgrades)
+        # Flash sdImage-ab to a card, then use rootfsPartition for subsequent upgrades:
+        #   nix build .#sdImage-ab && dd if=result/sd-flashable.img of=/dev/sdX bs=4M
+        #   nix build .#rootfsPartition && ssh root@luckfox upgrade < result/rootfs.ext4
+        sdImage-ab            = picoMiniB-ab.config.system.build.sdImage;
+        rootfsPartition       = picoMiniB-ab.config.system.build.rootfsPartition;
+        slotSelectInitramfs   = picoMiniB-ab.config.system.build.slotSelectInitramfs;
 
         # QEMU test outputs
         qemu-initramfs    = picoMiniB-qemu.config.system.build.initramfs;

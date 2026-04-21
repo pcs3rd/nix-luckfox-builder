@@ -23,20 +23,30 @@
 #
 # ── SD card layout ───────────────────────────────────────────────────────────
 #
-# The Ox64 expects an SD card with two partitions:
-#   p1 — FAT32 boot partition containing:
-#          low_load_bl808_d0.bin   (D0 pre-loader — from ox64-firmware)
-#          low_load_bl808_m0.bin   (M0 pre-loader — from ox64-firmware)
-#          Image                   (Linux kernel)
-#          bl808-pine64-ox64.dtb   (device tree)
-#          extlinux/extlinux.conf  (U-Boot boot script)
+# The Ox64 expects an SD card with these partitions:
+#
+# Without A/B:
+#   p1 — FAT32 boot partition (kernel, DTB, pre-loaders, extlinux.conf)
 #   p2 — ext4 rootfs (what this builder produces)
 #
-# TODO: extend modules/core/sdimage.nix with an ox64 variant that creates
-# the FAT32 boot partition and copies the pre-loader blobs into it.
-# For now, use the OpenBouffalo sdcard.img as p1 and flash the Nix rootfs
-# image onto p2 manually:
+# With A/B (system.abRootfs.enable = true):
+#   p1 — FAT32 boot partition (kernel, DTB, pre-loaders, extlinux.conf,
+#                              slot-select initramfs — set-and-forget)
+#   p2 — ext4 rootfs A  (active on first boot)
+#   p3 — ext4 rootfs B  (populated on first upgrade)
+#
+# NOTE: sdimage.nix handles the Luckfox (ext4-only) SD layout.  The Ox64
+# FAT32 boot partition is managed separately via the OpenBouffalo sdcard.img.
+# Use that image as a base and flash the Nix-built rootfs onto p2 (and p3
+# when using A/B):
 #   dd if=result/rootfs.img of=/dev/sdX2 bs=4M status=progress
+#
+# For A/B: also copy the slot-select initramfs into the FAT boot partition:
+#   nix build .#slotSelectInitramfs
+#   mount /dev/sdX1 /mnt
+#   cp result/initramfs-slotselect.cpio.gz /mnt/
+#   # add  INITRD /initramfs-slotselect.cpio.gz  to extlinux/extlinux.conf
+#   umount /mnt
 #
 # ── U-Boot ──────────────────────────────────────────────────────────────────
 # U-Boot for Ox64 lives in https://github.com/openbouffalo/u-boot.
@@ -65,8 +75,21 @@ in
     baud = 2000000;
   };
 
-  # Root on mmcblk0p2; p1 is the FAT32 boot partition
+  # Root on mmcblk0p2; p1 is the FAT32 boot partition.
+  # With A/B enabled, the actual root is chosen at runtime by the
+  # slot-select initramfs — this cmdline is the fallback / informational value.
   boot.cmdline = "console=ttyS0,2000000 root=/dev/mmcblk0p2 rw rootfstype=ext4 rootwait";
+
+  # ── A/B rootfs slot configuration ────────────────────────────────────────
+  # p1 is the FAT32 boot partition (never upgraded).
+  # Rootfs A lives on p2, rootfs B on p3.
+  # Enable in your configuration.nix with:  system.abRootfs.enable = true;
+  system.abRootfs = {
+    slotDisk   = "/dev/mmcblk0";
+    slotOffset = 512;               # byte 512 = sector 1, between MBR and FAT p1
+    slotA      = "/dev/mmcblk0p2"; # p1 is the FAT32 boot partition (never upgraded)
+    slotB      = "/dev/mmcblk0p3";
+  };
 
   # Rockchip-specific modules don't apply to BL808
   rockchip.enable   = false;

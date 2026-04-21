@@ -495,14 +495,89 @@ with lib;
       };
     };
 
+    system.abRootfs = {
+      enable = mkEnableOption ''
+        A/B rootfs for zero-downtime over-SSH upgrades.
+
+        Stores a single slot indicator byte at a raw disk offset (sector 1 by
+        default).  A tiny slot-select initramfs reads it at boot and
+        switch_root's into the matching partition — no bootloader changes needed.
+
+        /bin/upgrade streams a new rootfs image from stdin to the inactive slot,
+        flips the slot byte, and reboots.  /bin/slot shows the current state.
+
+        See modules/core/ab-rootfs.nix for the full design description.
+      '';
+
+      slotDisk = mkOption {
+        type        = types.str;
+        default     = "/dev/mmcblk0";
+        description = "Raw block device that holds the slot indicator byte.";
+      };
+
+      slotOffset = mkOption {
+        type        = types.int;
+        default     = 512;
+        description = ''
+          Byte offset within slotDisk at which the single slot indicator byte
+          ('a' or 'b') is stored.  The default 512 is the first byte of sector 1 —
+          safely between the MBR (sector 0) and the first bootloader stage on
+          both the Luckfox (Rockchip SPL at sector 64) and Ox64 (FAT partition
+          starting at sector 2048).
+        '';
+      };
+
+      slotA = mkOption {
+        type        = types.str;
+        default     = "/dev/mmcblk0p1";
+        description = ''
+          Block device for rootfs slot A.
+          Luckfox default: /dev/mmcblk0p1  (partition 1 also holds the kernel).
+          Ox64:            /dev/mmcblk0p2  (partition 1 is the FAT boot partition).
+        '';
+      };
+
+      slotB = mkOption {
+        type        = types.str;
+        default     = "/dev/mmcblk0p2";
+        description = ''
+          Block device for rootfs slot B.
+          Luckfox default: /dev/mmcblk0p2.
+          Ox64:            /dev/mmcblk0p3.
+        '';
+      };
+    };
+
     system.build = {
-      rootfs    = mkOption { type = types.path; readOnly = true; };
-      initramfs = mkOption { type = types.path; readOnly = true; };
-      image     = mkOption { type = types.path; readOnly = true; };
-      sdImage   = mkOption { type = types.path; readOnly = true; };
-      uboot     = mkOption { type = types.path; readOnly = true; };
-      rockchip  = mkOption { type = types.path; readOnly = true; };
-      firmware  = mkOption { type = types.path; readOnly = true; };
+      rootfs             = mkOption { type = types.path; readOnly = true; };
+      initramfs          = mkOption { type = types.path; readOnly = true; };
+      image              = mkOption { type = types.path; readOnly = true; };
+      sdImage            = mkOption { type = types.path; readOnly = true; };
+      uboot              = mkOption { type = types.path; readOnly = true; };
+      rockchip           = mkOption { type = types.path; readOnly = true; };
+      firmware           = mkOption { type = types.path; readOnly = true; };
+      slotSelectInitramfs = mkOption {
+        type        = types.nullOr types.path;
+        default     = null;
+        readOnly    = true;
+        description = ''
+          The slot-select initramfs cpio.gz produced by ab-rootfs.nix.
+          Exposed here so sdimage.nix can embed it in the boot partition.
+          Null when system.abRootfs.enable = false.
+        '';
+      };
+      rootfsPartition = mkOption {
+        type        = types.nullOr types.path;
+        default     = null;
+        readOnly    = true;
+        description = ''
+          A standalone raw ext4 image of the rootfs, suitable for streaming
+          to /bin/upgrade over SSH:
+            nix build .#rootfsPartition
+            ssh root@device upgrade < result/rootfs.ext4
+          Null when system.abRootfs.enable = false.
+        '';
+      };
     };
   };
 }

@@ -1,18 +1,28 @@
-# Flashable SD image for the Luckfox Pico Mini B (Rockchip RV1103)
+# Flashable SD image for Luckfox Pico Mini B (Rockchip RV1103) and
+# Pine64 Ox64 (BL808 RISC-V).
 #
 # Produces a raw disk image that can be written directly to an SD card:
 #
 #   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
 #
-# Layout:
-#   Offset 0x0000 (sector     0) : MBR + partition table
-#   Offset 0x8000 (sector    64) : Rockchip SPL / idbloader  ← if provided
-#   Offset 0x8000 00 (sector 16384) : U-Boot proper          ← if provided
-#   Offset 0x10 0000 (2 MiB)    : ext4 rootfs partition (partition 1)
+# ── Single-partition layout (A/B disabled) ───────────────────────────────────
 #
-# The 2 MiB gap before the first partition gives plenty of room for both
-# the MBR and the Rockchip bootloader blobs without overlapping the data
-# partition.
+#   Offset 0x000 (sector     0) : MBR + partition table
+#   Offset 0x020 (sector    64) : Rockchip SPL / idbloader  ← if provided
+#   Offset 0x800 00 (sec 16384) : U-Boot proper              ← if provided
+#   Offset 0x100 000  (2 MiB)  : ext4 rootfs (partition 1)
+#
+# ── A/B dual-partition layout (A/B enabled) ──────────────────────────────────
+#
+#   Offset 0x000 (sector     0) : MBR + partition table
+#   Offset 0x200 (byte      512): slot indicator byte ('a')  ← written here
+#   Offset 0x020 (sector    64) : Rockchip SPL / idbloader  ← if provided
+#   Offset 0x800 00 (sec 16384) : U-Boot proper              ← if provided
+#   Offset 0x100 000  (2 MiB)  : ext4 rootfs A (partition 1) ← kernel + initramfs + rootfs
+#   Following p1               : ext4 rootfs B (partition 2) ← rootfs only
+#
+#   extlinux.conf in partition 1 references the slot-select initramfs so the
+#   bootloader passes control to it before mounting any rootfs partition.
 #
 # macOS-compatible: uses mkfs.ext4 -d to populate the filesystem from a
 # directory — no losetup or mount required.
@@ -23,6 +33,7 @@ let
   rootfs = config.system.build.rootfs;
   spl    = config.boot.uboot.spl;
   uboot  = config.boot.uboot.package;
+  abCfg  = config.system.abRootfs;
 
   # Sector at which partition 1 starts (2 MiB = 4096 × 512 B sectors).
   partStartSector = 4096;
@@ -39,16 +50,67 @@ in
     IMAGE_MB=${toString config.system.imageSize}
     SECTOR=${toString partStartSector}
     IMAGE_BYTES=$(( IMAGE_MB * 1024 * 1024 ))
-    PART_SIZE_SECTORS=$(( (IMAGE_BYTES / 512) - SECTOR ))
-    PART_SIZE_BYTES=$(( PART_SIZE_SECTORS * 512 ))
+    TOTAL_SECTORS=$(( IMAGE_BYTES / 512 ))
+    AVAILABLE_SECTORS=$(( TOTAL_SECTORS - SECTOR ))
 
     echo "Building flashable SD image (''${IMAGE_MB} MiB)..."
 
     # ── Blank image ─────────────────────────────────────────────────────────
     dd if=/dev/zero of=$out/sd-flashable.img bs=1M count=$IMAGE_MB 2>/dev/null
 
-    # ── MBR partition table ─────────────────────────────────────────────────
-    # Written with Python so this step works on macOS and Linux alike.
+    ${if abCfg.enable then ''
+    # ── A/B: two equal-size rootfs partitions ───────────────────────────────
+    PART_SIZE_SECTORS=$(( AVAILABLE_SECTORS / 2 ))
+    PART_SIZE_BYTES=$(( PART_SIZE_SECTORS * 512 ))
+    PART2_START=$(( SECTOR + PART_SIZE_SECTORS ))
+
+    echo "A/B mode: each partition = ''${PART_SIZE_SECTORS} sectors ($(( PART_SIZE_BYTES / 1024 / 1024 )) MiB)"
+
+    # Write slot indicator byte 'a' at sector 1 (byte offset 512)
+    printf 'a' | dd of=$out/sd-flashable.img bs=1 seek=${toString abCfg.slotOffset} conv=notrunc 2>/dev/null
+
+    # MBR with two partition entries
+    python3 - $SECTOR $PART_SIZE_SECTORS $PART2_START << 'PYEOF'
+import struct, sys
+
+start1 = int(sys.argv[1])
+size   = int(sys.argv[2])
+start2 = int(sys.argv[3])
+
+def chs(lba):
+    c = min(lba // (255 * 63), 1023)
+    h = (lba // 63) % 255
+    s = (lba %  63) + 1
+    return bytes([h & 0xFF, (s & 0x3F) | ((c >> 2) & 0xC0), c & 0xFF])
+
+def part_entry(start, size):
+    return struct.pack('<B3sB3sII',
+        0x00,
+        chs(start),
+        0x83,  # Linux filesystem
+        chs(start + size - 1),
+        start,
+        size,
+    )
+
+mbr = (b'\x00' * 446
+       + part_entry(start1, size)
+       + part_entry(start2, size)
+       + b'\x00' * 32
+       + b'\x55\xAA')
+
+import os
+fd = os.open('mbr.bin', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+os.write(fd, mbr)
+os.close(fd)
+PYEOF
+
+    '' else ''
+    # ── Single partition ─────────────────────────────────────────────────────
+    PART_SIZE_SECTORS=$AVAILABLE_SECTORS
+    PART_SIZE_BYTES=$(( PART_SIZE_SECTORS * 512 ))
+
+    # MBR with one partition entry
     python3 - $SECTOR $PART_SIZE_SECTORS << 'PYEOF'
 import struct, sys
 
@@ -56,19 +118,18 @@ start = int(sys.argv[1])
 size  = int(sys.argv[2])
 
 def chs(lba):
-    """Pack LBA address as a 3-byte CHS tuple (best-effort, capped at 1023)."""
     c = min(lba // (255 * 63), 1023)
     h = (lba // 63) % 255
     s = (lba %  63) + 1
     return bytes([h & 0xFF, (s & 0x3F) | ((c >> 2) & 0xC0), c & 0xFF])
 
 entry = struct.pack('<B3sB3sII',
-    0x00,              # status: not bootable
-    chs(start),        # CHS of first sector
-    0x83,              # partition type: Linux filesystem
+    0x00,
+    chs(start),
+    0x83,
     chs(start + size - 1),
-    start,             # LBA start
-    size,              # LBA size
+    start,
+    size,
 )
 mbr = b'\x00' * 446 + entry + b'\x00' * 48 + b'\x55\xAA'
 
@@ -77,6 +138,8 @@ fd = os.open('mbr.bin', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
 os.write(fd, mbr)
 os.close(fd)
 PYEOF
+
+    ''}
     dd if=mbr.bin of=$out/sd-flashable.img bs=1 conv=notrunc 2>/dev/null
 
     # ── Stage rootfs + kernel + DTB + extlinux.conf ─────────────────────────
@@ -91,27 +154,52 @@ PYEOF
       cp ${config.device.dtb} staging/${config.device.name}.dtb
     ''}
 
+    ${lib.optionalString abCfg.enable ''
+      # Copy slot-select initramfs into the staging directory.
+      cp ${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz \
+         staging/initramfs-slotselect.cpio.gz
+    ''}
+
     mkdir -p staging/extlinux
     cat > staging/extlinux/extlinux.conf << EXTEOF
 LABEL linux
   KERNEL /zImage
 ${lib.optionalString (config.device.dtb != null)
   "  FDT /${config.device.name}.dtb"}
+${lib.optionalString abCfg.enable
+  "  INITRD /initramfs-slotselect.cpio.gz"}
   APPEND ${config.boot.cmdline}
 EXTEOF
 
-    # ── Build ext4 partition image from staging directory ───────────────────
+    # ── Build ext4 partition 1 image from staging directory ─────────────────
     # mkfs.ext4 -d populates the filesystem in-place from a directory tree,
     # without needing to mount anything — safe on macOS and in the Nix sandbox.
-    dd if=/dev/zero of=part.img bs=1 count=0 seek=$PART_SIZE_BYTES 2>/dev/null
+    dd if=/dev/zero of=part1.img bs=1 count=0 seek=$PART_SIZE_BYTES 2>/dev/null
     mkfs.ext4 \
       -d staging \
-      -L rootfs \
+      -L rootfs-a \
       -E lazy_itable_init=0,lazy_journal_init=0 \
-      part.img
+      part1.img
 
-    # ── Embed partition into disk image ─────────────────────────────────────
-    dd if=part.img of=$out/sd-flashable.img bs=512 seek=$SECTOR conv=notrunc 2>/dev/null
+    # ── Embed partition 1 into disk image ────────────────────────────────────
+    dd if=part1.img of=$out/sd-flashable.img bs=512 seek=$SECTOR conv=notrunc 2>/dev/null
+
+    ${if abCfg.enable then ''
+    # ── Build ext4 partition 2 (slot B — rootfs only, no kernel) ────────────
+    # Slot B only needs the rootfs; the bootloader always loads the kernel
+    # from slot A (partition 1).  Staged without kernel/DTB/extlinux/initramfs.
+    cp -r ${rootfs} staging-b
+    chmod -R u+w staging-b
+
+    dd if=/dev/zero of=part2.img bs=1 count=0 seek=$PART_SIZE_BYTES 2>/dev/null
+    mkfs.ext4 \
+      -d staging-b \
+      -L rootfs-b \
+      -E lazy_itable_init=0,lazy_journal_init=0 \
+      part2.img
+
+    dd if=part2.img of=$out/sd-flashable.img bs=512 seek=$PART2_START conv=notrunc 2>/dev/null
+    '' else ""}
 
     # ── Write Rockchip bootloader blobs ─────────────────────────────────────
     # SPL / idbloader at sector 64 (Rockchip boot ROM requirement)
@@ -127,6 +215,10 @@ EXTEOF
     ''}
 
     echo "SD image ready: $out/sd-flashable.img"
+    ${if abCfg.enable then ''
+    echo "A/B layout: slot A = partition 1, slot B = partition 2"
+    echo "Slot indicator byte 'a' written at byte offset ${toString abCfg.slotOffset}"
+    '' else ""}
     echo "Flash with: dd if=$out/sd-flashable.img of=/dev/sdX bs=4M status=progress"
   '';
 }
