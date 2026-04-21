@@ -36,13 +36,17 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
     pkg-config
   ];
 
-  # RF24's CMakeLists.txt uses add_library(rf24 SHARED …) even when
-  # BUILD_SHARED_LIBS=OFF is set via a cmake flag, because the flag is
-  # evaluated after the library target is declared.  Patch the source so
-  # the target is always STATIC — required for the musl ARM32 static build
-  # where C++ RTTI relocations in libstdc++.a are unsupported.
+  # RF24's CMakeLists.txt hardcodes add_library(rf24 SHARED …).
+  # The musl ARM32 static toolchain cannot produce shared libs — C++ RTTI
+  # symbols in libstdc++.a use relocations that binutils-arm rejects.
+  # Two passes:
+  #   1. On any add_library line mentioning rf24, flip SHARED → STATIC.
+  #   2. Drop set_target_properties calls that set SOVERSION/VERSION (those
+  #      properties only make sense for shared libs and cause cmake to try
+  #      to create versioned .so symlinks even on a STATIC target).
   postPatch = ''
-    sed -i 's/add_library(\s*rf24\s*SHARED/add_library(rf24 STATIC/g' CMakeLists.txt
+    sed -i '/add_library.*rf24/s/SHARED/STATIC/g'  CMakeLists.txt
+    sed -i '/SOVERSION\|set_target_properties.*VERSION/d' CMakeLists.txt
   '';
 
   cmakeFlags = [
