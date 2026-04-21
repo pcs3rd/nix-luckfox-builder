@@ -199,6 +199,7 @@ PYWRAP
           ${pkgs.ncurses} \
           ${pkgs.expat} \
           ${pkgs.readline} \
+          ${pkgs.stdenv.cc.cc.lib} \
           -name "$libname" -type f 2>/dev/null | head -1)
         if [ -n "$found" ]; then
           install -Dm755 "$found" "$out/lib/$libname"
