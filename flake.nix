@@ -56,6 +56,7 @@
       # ── System evaluations ──────────────────────────────────────────────────
       picoMiniB         = mkSystem { configuration = ./configuration.nix; };
       picoMiniB-qemu    = mkSystem { configuration = ./configurations/qemu-test.nix; };
+      picoMiniB-vm      = mkSystem { configuration = ./configurations/qemu-vm.nix; };
       picoMiniB-sdimage = mkSystem { configuration = ./configurations/sdimage.nix; };
 
       # ── QEMU runner (initramfs) ──────────────────────────────────────────────
@@ -86,6 +87,121 @@
             -kernel ${qemuKernel}/zImage \
             -initrd ${picoMiniB-qemu.config.system.build.initramfs} \
             -append "${picoMiniB-qemu.config.boot.cmdline}" \
+            -nographic \
+            -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
+            -device virtio-net-device,netdev=net0 \
+            -device virtio-rng-device
+        '';
+      };
+
+      # ── Importable QCOW2 disk image ─────────────────────────────────────────
+      #
+      # Builds an ext4 filesystem from the rootfs tree using mke2fs -d
+      # (no mount required — works inside the Nix sandbox) then converts
+      # to compressed QCOW2 for compact distribution.
+      qemu-vm-disk = hostPkgs.runCommand "luckfox-vm.qcow2" {
+        nativeBuildInputs = with hostPkgs; [ e2fsprogs qemu ];
+      } ''
+        echo "=== populating ext4 image from rootfs ==="
+        # 512 MiB is generous for this rootfs; adjust if you add large packages.
+        truncate -s 512M rootfs.img
+        mkfs.ext4 -L rootfs \
+          -d ${picoMiniB-vm.config.system.build.rootfs} \
+          rootfs.img
+
+        echo "=== converting to compressed QCOW2 ==="
+        qemu-img convert -f raw -O qcow2 -c rootfs.img $out
+        echo "=== done: $(du -sh $out | cut -f1) on disk ==="
+      '';
+
+      # ── Self-contained VM bundle ──────────────────────────────────────────────
+      #
+      # A directory containing:
+      #   luckfox.qcow2  — the root disk (writable copy required — see run.sh)
+      #   zImage         — the ARM kernel
+      #   run.sh         — portable launch script (copies disk on first run)
+      #
+      # Usage:
+      #   cp -r $(nix build .#qemu-vm-bundle --print-out-paths) ~/luckfox-vm
+      #   chmod -R u+w ~/luckfox-vm        # make writable
+      #   ~/luckfox-vm/run.sh
+      #
+      # Or just: nix run .#qemu-vm
+      qemu-vm-bundle = hostPkgs.runCommand "luckfox-vm-bundle" {} ''
+        mkdir -p $out
+        cp ${qemu-vm-disk}       $out/luckfox.qcow2
+        cp ${qemuKernel}/zImage  $out/zImage
+
+        cat > $out/run.sh << 'RUNEOF'
+#!/bin/sh
+# Luckfox Pico Mini B — QEMU VM launcher
+# Copy this whole directory somewhere writable before running.
+set -e
+DIR="$(cd "$(dirname "$0")" && pwd)"
+DISK="$DIR/luckfox.qcow2"
+KERNEL="$DIR/zImage"
+SSH_PORT="''${SSH_PORT:-2222}"
+
+if [ ! -w "$DISK" ]; then
+  echo "ERROR: $DISK is read-only." >&2
+  echo "Copy the bundle directory to a writable location first:" >&2
+  echo "  cp -rL <bundle-path> ~/luckfox-vm && chmod -R u+w ~/luckfox-vm" >&2
+  exit 1
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Luckfox Pico Mini B — QEMU virt (ARMv7 / 512 MB)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Serial console below  (Ctrl-A X to quit QEMU)"
+echo "  SSH: ssh root@localhost -p $SSH_PORT"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+exec qemu-system-arm \
+  -M virt \
+  -cpu cortex-a7 \
+  -m 512M \
+  -kernel "$KERNEL" \
+  -append "console=ttyAMA0 root=/dev/vda rw init=/sbin/init panic=1" \
+  -drive  "file=$DISK,format=qcow2,if=virtio" \
+  -nographic \
+  -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22" \
+  -device virtio-net-device,netdev=net0 \
+  -device virtio-rng-device
+RUNEOF
+        chmod +x $out/run.sh
+      '';
+
+      # ── QEMU VM app (uses ephemeral overlay so Nix store disk stays pristine) ─
+      qemu-vm = hostPkgs.writeShellApplication {
+        name = "qemu-vm-luckfox";
+        runtimeInputs = with hostPkgs; [ qemu python3 ];
+        text = ''
+          SSH_PORT=$(python3 -c \
+            "import socket; s=socket.socket(); s.bind(('',0)); \
+             print(s.getsockname()[1]); s.close()")
+
+          # The Nix store disk is read-only; layer a writable QCOW2 overlay.
+          OVERLAY=$(mktemp /tmp/luckfox-vm.XXXXXX.qcow2)
+          qemu-img create -f qcow2 \
+            -b ${qemu-vm-disk} -F qcow2 "$OVERLAY" > /dev/null
+          cleanup() { rm -f "$OVERLAY"; }
+          trap cleanup EXIT
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Luckfox Pico Mini B — QEMU VM (ARMv7 / 512 MB)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Serial console below  (Ctrl-A X to quit)"
+          echo "  SSH: ssh root@localhost -p $SSH_PORT"
+          echo "  Disk changes are ephemeral (overlay deleted on exit)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          exec qemu-system-arm \
+            -M virt \
+            -cpu cortex-a7 \
+            -m 512M \
+            -kernel ${qemuKernel}/zImage \
+            -append "console=ttyAMA0 root=/dev/vda rw init=/sbin/init panic=1" \
+            -drive  "file=$OVERLAY,format=qcow2,if=virtio" \
             -nographic \
             -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
             -device virtio-net-device,netdev=net0 \
@@ -161,6 +277,11 @@
         qemu-initramfs    = picoMiniB-qemu.config.system.build.initramfs;
         qemu-test         = qemu-test;
         qemu-overlay      = qemu-overlay;
+
+        # Importable VM outputs
+        qemu-vm-disk      = qemu-vm-disk;    # standalone QCOW2
+        qemu-vm-bundle    = qemu-vm-bundle;  # QCOW2 + kernel + run.sh
+        qemu-vm           = qemu-vm;         # ephemeral-overlay launcher
       };
 
       apps = {
@@ -171,6 +292,10 @@
         qemu-overlay = {
           type    = "app";
           program = "${qemu-overlay}/bin/qemu-overlay-luckfox";
+        };
+        qemu-vm = {
+          type    = "app";
+          program = "${qemu-vm}/bin/qemu-vm-luckfox";
         };
       };
 

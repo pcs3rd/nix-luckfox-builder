@@ -71,11 +71,14 @@ SSH_EOF
 
     # ── SD overlay tools and init script ──────────────────────────────────
     ${lib.optionalString config.system.sdOverlay.enable ''
-      # Tools needed by init-overlay
-      cp $(find ${pkgs.e2fsprogs}   -name mkfs.ext4  -type f | head -1) $out/sbin/
-      cp $(find ${pkgs.util-linux}  -name sfdisk     -type f | head -1) $out/sbin/
-      cp $(find ${pkgs.util-linux}  -name blkid      -type f | head -1) $out/sbin/
-      cp $(find ${pkgs.util-linux}  -name blockdev   -type f | head -1) $out/sbin/
+      # Tools needed by init-overlay.
+      # Use '! -type d' so find matches both regular files AND symlinks
+      # (nixpkgs installs mkfs.ext4 as a symlink to mke2fs; -type f misses it).
+      # -L on cp dereferences the symlink so we install the real ELF.
+      cp -L $(find ${pkgs.e2fsprogs}  -name mkfs.ext4  ! -type d | head -1) $out/sbin/mkfs.ext4
+      cp -L $(find ${pkgs.util-linux} -name sfdisk     ! -type d | head -1) $out/sbin/sfdisk
+      cp -L $(find ${pkgs.util-linux} -name blkid      ! -type d | head -1) $out/sbin/blkid
+      cp -L $(find ${pkgs.util-linux} -name blockdev   ! -type d | head -1) $out/sbin/blockdev
       chmod +x $out/sbin/mkfs.ext4 $out/sbin/sfdisk $out/sbin/blkid $out/sbin/blockdev
 
       # pivot_root BusyBox applet
@@ -167,10 +170,10 @@ OVERLAY_EOF
 
     # ── Self-expanding rootfs tools ────────────────────────────────────────
     ${lib.optionalString config.system.sdExpand.enable ''
-      cp $(find ${pkgs.e2fsprogs} -name resize2fs -type f | head -1) $out/sbin/
+      cp -L $(find ${pkgs.e2fsprogs}  -name resize2fs ! -type d | head -1) $out/sbin/resize2fs
       chmod +x $out/sbin/resize2fs
 
-      cp $(find ${pkgs.util-linux} -name sfdisk -type f | head -1) $out/sbin/
+      cp -L $(find ${pkgs.util-linux} -name sfdisk    ! -type d | head -1) $out/sbin/sfdisk
       chmod +x $out/sbin/sfdisk
 
       cat > $out/sbin/expand-rootfs << 'EXPAND_EOF'
