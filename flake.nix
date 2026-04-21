@@ -82,7 +82,7 @@
           exec qemu-system-arm \
             -M virt \
             -cpu cortex-a7 \
-            -m 256M \
+            -m 512M \
             -kernel ${qemuKernel}/zImage \
             -initrd ${picoMiniB-qemu.config.system.build.initramfs} \
             -append "${picoMiniB-qemu.config.boot.cmdline}" \
@@ -137,7 +137,7 @@
           qemu-system-arm \
             -M virt \
             -cpu cortex-a7 \
-            -m 256M \
+            -m 512M \
             -kernel ${qemuKernel}/zImage \
             -append "console=ttyAMA0 root=/dev/vda rw init=/sbin/init panic=1" \
             -drive file="$OVERLAY",format=qcow2,if=virtio \

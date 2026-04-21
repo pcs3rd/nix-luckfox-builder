@@ -14,6 +14,14 @@ in
     sysinfo
     htop
   ];
+  # Compressed RAM swap — gives ~96 MB of effective swap on a 64 MB board.
+  # lz4 is fast enough that even a Cortex-A7 barely notices the overhead.
+  system.zram = {
+    enable    = true;
+    size      = "32M";
+    algorithm = "lz4";
+  };
+
   services.nrfnet = {
     enable    = false;
     role      = "primary";      # or "secondary"
@@ -21,7 +29,7 @@ in
     channel   = 42;
   };
   services."meshing-around".enable = true;
-  services.ssh.enable = true;
+  services.ssh.enable = false;
   services.getty.enable = true;
 
   networking = {

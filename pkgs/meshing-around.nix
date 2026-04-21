@@ -103,6 +103,24 @@ pkgs.stdenv.mkDerivation {
       pyVer=$(basename "$pyLibDir")
       mkdir -p "$out/opt/meshing-around/lib/$pyVer"
       cp -rLT "$pyLibDir" "$out/opt/meshing-around/lib/$pyVer"
+
+      # ── Trim heavyweight stdlib directories not needed by mesh_bot ─────────
+      # These modules add 40-50 MB uncompressed and are never imported at runtime.
+      #   test / unittest  — test suites
+      #   tkinter          — Tk GUI bindings
+      #   idlelib          — IDLE IDE
+      #   turtledemo       — turtle graphics demos
+      #   lib2to3          — Python 2→3 migration tool
+      #   ensurepip        — pip bootstrapper (no pip on embedded target)
+      #   distutils        — legacy build system
+      #   venv             — virtual environment support
+      for trimDir in test unittest tkinter idlelib turtledemo lib2to3 ensurepip distutils venv; do
+        rm -rf "$out/opt/meshing-around/lib/$pyVer/$trimDir" || true
+      done
+      # Drop per-module __pycache__ dirs inside any remaining test directories.
+      find "$out/opt/meshing-around/lib/$pyVer" \
+        -name '__pycache__' -prune -exec rm -rf {} \; 2>/dev/null || true
+
       # Patch RPATH of every .so in the stdlib so dlopen finds /lib deps.
       find "$out/opt/meshing-around/lib/$pyVer" -name '*.so*' -type f | \
         while read -r so; do
@@ -112,6 +130,11 @@ pkgs.stdenv.mkDerivation {
 
     # ── Bundled site-packages ─────────────────────────────────────────────
     cp -rLT ${bundledLibs} $out/opt/meshing-around/lib/
+
+    # Trim test directories from bundled site-packages (~5-10 MB).
+    find "$out/opt/meshing-around/lib" -maxdepth 3 \
+      \( -name 'test' -o -name 'tests' \) -type d \
+      -exec rm -rf {} + 2>/dev/null || true
 
     # ── Python interpreter + dynamic linker + shared libraries ───────────
     # nixpkgs wraps the real CPython ELF in a small makeBinaryWrapper shim

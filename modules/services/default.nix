@@ -17,5 +17,6 @@
     ./meshing-around.nix
     ./nrfnet.nix
     ./hello.nix
+    ./zram.nix
   ];
 }

@@ -27,4 +27,9 @@
   # configuration.nix enables these; force them off for QEMU
   boot.uboot.enable = lib.mkForce false;
   rockchip.enable   = lib.mkForce false;
+
+  # meshing-around bundles the full Python stdlib (~150 MB uncompressed).
+  # That blows the initramfs RAM budget in QEMU — disable it for the test image.
+  # It is still present in the SD image build via configuration.nix.
+  services."meshing-around".enable = lib.mkForce false;
 }

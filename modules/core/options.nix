@@ -120,6 +120,30 @@ with lib;
           description = "Block device that holds the overlay upper/work dirs (created on first boot).";
         };
       };
+
+      zram = {
+        enable = mkEnableOption "zram compressed swap";
+        size = mkOption {
+          type        = types.str;
+          default     = "32M";
+          description = ''
+            Size of the zram swap device, e.g. "32M" or "64M".
+            The device compresses ~3:1 on average so 32M of zram gives
+            roughly 96M of effective swap at near-zero latency.
+          '';
+        };
+        algorithm = mkOption {
+          type    = types.enum [ "lz4" "lzo" "lzo-rle" "zstd" ];
+          default = "lz4";
+          description = ''
+            Compression algorithm for zram.
+              lz4     — fastest compression/decompression; good default.
+              lzo     — slightly better ratio than lz4, still very fast.
+              lzo-rle — run-length variant of lzo; marginally better for text.
+              zstd    — best compression ratio; slightly more CPU intensive.
+          '';
+        };
+      };
     };
 
     services.user = mkOption {
