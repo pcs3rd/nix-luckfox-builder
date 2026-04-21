@@ -97,6 +97,13 @@ git+file:///Users/rdean3/Local%20Projects/nix-luckfox-builder?ref=refs/heads/mai
         ├───sdImage omitted (use '--all-systems' to show)
         ├───sdImage-flashable omitted (use '--all-systems' to show)
         └───uboot omitted (use '--all-systems' to show)  
-        
+
 # Configuration
 Make your changes in configuration.nix. THis repo includes an example that builds a rootfs with meshing-around and nrfnet running as services. 
+
+# Claude To-Do. 
+ - Package bitfocus companion satilite as a package/service.  
+ - Draft/propose a more minimal alternative to meshing-around. We only really need _basic_ bbs and store & foward services for now.  
+ - See what changes we eould need to make to allow this to also build for the pine64 Ox64. This sbc runs a bl808, and has 64-bit 480MHz RV64 C906 core and two 32-bit 320MHz RV32 E907 + 150MHz E902 cores, 728KB internal SRAM and 64MB internal PSRAM. We don't _need_ to add support for this, but if it isn't too hard, they're also pretty cheap.   
+ - Add a helper script at /bin/mcu. This script needs to take two options: reset and bootloader. The reset option should toggle a pin to simulate a button press using a mosfet. The bootloader option needs to press reset twice. 
+ - Package a version of the meshtastic python cli with the smallest footprint possible
