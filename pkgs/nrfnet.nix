@@ -26,6 +26,7 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
 
   nativeBuildInputs = [
     pkgs.buildPackages.cmake
+    pkgs.buildPackages.pkg-config
   ];
 
   buildInputs = [
