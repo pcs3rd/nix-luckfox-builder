@@ -11,6 +11,8 @@
 let
   NRFNET_REV    = "934b34ef4dbb071a90680a3d4326c098b0d1557d";
   NRFNET_SHA256 = "sha256-vSCRrYAAk8PEf9v7r75L0SMVSY1NU7wFNcv8q9ElT48=";
+
+  rf24 = import ./rf24.nix { inherit pkgs; };
 in
 
 pkgs.pkgsStatic.stdenv.mkDerivation {
@@ -31,6 +33,7 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
 
   buildInputs = [
     pkgs.pkgsStatic.tclap
+    rf24
   ];
 
   # nrfnet's CMakeLists.txt declares cmake_minimum_required < 3.5, which CMake

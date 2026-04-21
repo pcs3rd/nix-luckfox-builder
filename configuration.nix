@@ -14,7 +14,7 @@ in
     sysinfo
     htop
     nano
-    nrfnet
+    # nrfnet is added automatically when services.nrfnet.enable = true
   ];
 
   # Vendor kernel modules — required for CONFIG_ZRAM=m and any other =m driver.
