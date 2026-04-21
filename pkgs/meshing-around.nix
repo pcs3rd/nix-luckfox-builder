@@ -42,7 +42,7 @@ let
     geopy           # geocoding (--pos features)
     beautifulsoup4  # HTML scraping for weather pages
     schedule        # cron-style task scheduling
-    # maidenhead — not in nixpkgs; grid-square features degrade gracefully
+    # maidenhead — not in nixpkgs; bundled as maidenhead.py in installPhase
   ];
 
   # Gather all transitive site-packages into one flat directory so we can
@@ -135,6 +135,93 @@ pkgs.stdenv.mkDerivation {
     find "$out/opt/meshing-around/lib" -maxdepth 3 \
       \( -name 'test' -o -name 'tests' \) -type d \
       -exec rm -rf {} + 2>/dev/null || true
+
+    # ── maidenhead — not in nixpkgs; ship a minimal pure-Python implementation
+    # Implements toMaiden(lat, lon) and toLoc(maiden) per the ITU-R M.1079 spec.
+    cat > "$out/opt/meshing-around/lib/maidenhead.py" << 'MAIDENHEAD'
+"""
+Maidenhead grid locator — minimal pure-Python implementation.
+Bundled by the Nix build because maidenhead is not in nixpkgs.
+"""
+
+__version__ = "1.0.0-nix-bundled"
+
+
+def toMaiden(lat: float, lon: float, precision: int = 3) -> str:
+    """Convert (latitude, longitude) to a Maidenhead grid locator string.
+
+    precision controls the number of pairs of characters returned:
+      1 → 2 chars  (field, e.g. "IO")
+      2 → 4 chars  (square, e.g. "IO91")
+      3 → 6 chars  (subsquare, e.g. "IO91wm")  ← default
+      4 → 8 chars  (extended square)
+    """
+    if not -90 <= lat <= 90:
+        raise ValueError(f"Latitude {lat} out of range -90..90")
+    if not -180 <= lon <= 180:
+        raise ValueError(f"Longitude {lon} out of range -180..180")
+
+    lon += 180.0
+    lat += 90.0
+
+    maiden = (
+        chr(ord("A") + int(lon / 20))
+        + chr(ord("A") + int(lat / 10))
+    )
+    if precision < 2:
+        return maiden
+
+    maiden += str(int((lon % 20) / 2)) + str(int(lat % 10))
+    if precision < 3:
+        return maiden
+
+    maiden += (
+        chr(ord("a") + int((lon % 2) * 12))
+        + chr(ord("a") + int((lat % 1) * 24))
+    )
+    if precision < 4:
+        return maiden
+
+    maiden += (
+        str(int(((lon % 2) * 12 % 1) * 10))
+        + str(int(((lat % 1) * 24 % 1) * 10))
+    )
+    return maiden
+
+
+def toLoc(maiden: str) -> tuple:
+    """Convert a Maidenhead grid locator to (latitude, longitude).
+
+    Returns the centre of the smallest encoded grid cell.
+    """
+    maiden = maiden.strip().upper()
+    n = len(maiden)
+    if n < 2:
+        raise ValueError(f"Grid square {maiden!r} is too short")
+
+    lon = (ord(maiden[0]) - ord("A")) * 20.0 - 180.0
+    lat = (ord(maiden[1]) - ord("A")) * 10.0 - 90.0
+
+    if n >= 4:
+        lon += int(maiden[2]) * 2.0
+        lat += int(maiden[3]) * 1.0
+
+    if n >= 6:
+        lon += (ord(maiden[4]) - ord("A") + 0.5) * (2.0 / 24)
+        lat += (ord(maiden[5]) - ord("A") + 0.5) * (1.0 / 24)
+    elif n >= 4:
+        lon += 1.0
+        lat += 0.5
+    else:
+        lon += 10.0
+        lat += 5.0
+
+    if n >= 8:
+        lon += (int(maiden[6]) + 0.5) * (2.0 / 240)
+        lat += (int(maiden[7]) + 0.5) * (1.0 / 240)
+
+    return lat, lon
+MAIDENHEAD
 
     # ── Python interpreter + dynamic linker + shared libraries ───────────
     # nixpkgs wraps the real CPython ELF in a small makeBinaryWrapper shim
