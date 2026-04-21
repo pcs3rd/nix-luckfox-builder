@@ -81,6 +81,8 @@ pkgs.stdenv.mkDerivation {
     sha256 = MESHING_SHA256;
   };
 
+  nativeBuildInputs = [ pkgs.buildPackages.patchelf ];
+
   dontBuild  = true;
   dontFixup  = true;   # skip strip/patchelf — Python scripts + a foreign ELF
 
@@ -93,12 +95,48 @@ pkgs.stdenv.mkDerivation {
     mkdir -p $out/opt/meshing-around/lib
     cp -rLT ${bundledLibs} $out/opt/meshing-around/lib/
 
-    # ── Python interpreter ────────────────────────────────────────────────
-    # Copy the actual ELF binary (not the nixpkgs wrapper script) so it works
-    # on the target without the Nix store.
-    mkdir -p $out/bin
-    pythonBin=$(readlink -f ${python}/bin/python3)
-    install -Dm755 "$pythonBin" $out/bin/python3
+    # ── Python interpreter + dynamic linker + shared libraries ───────────
+    # nixpkgs wraps the real CPython ELF in a small makeBinaryWrapper shim
+    # (~7 KB) that execs the real interpreter at an absolute /nix/store/…
+    # path — which does not exist on the target.  Find the real ELF first.
+    mkdir -p $out/bin $out/lib
+
+    realPython=$(ls ${python}/bin/.python*-wrapped 2>/dev/null | head -1)
+    [ -z "$realPython" ] && realPython=$(readlink -f ${python}/bin/python3)
+    install -Dm755 "$realPython" $out/bin/python3
+
+    # Copy the ELF interpreter (musl dynamic linker, e.g. ld-musl-armhf.so.1).
+    # patchelf tells us exactly which one this binary was linked against.
+    interp=$(patchelf --print-interpreter "$realPython" 2>/dev/null || true)
+    if [ -n "$interp" ] && [ -f "$interp" ]; then
+      install -Dm755 "$interp" "$out/lib/$(basename "$interp")"
+    fi
+
+    # Copy every direct shared-library dependency of the Python binary.
+    # We search across the packages that Python links against at build time.
+    copy_needed() {
+      local elf="$1"
+      patchelf --print-needed "$elf" 2>/dev/null | while read -r libname; do
+        [ -f "$out/lib/$libname" ] && continue
+        found=$(find \
+          ${python} \
+          ${pkgs.zlib} \
+          ${pkgs.libffi} \
+          ${pkgs.openssl.out} \
+          ${pkgs.sqlite} \
+          ${pkgs.bzip2} \
+          ${pkgs.xz} \
+          ${pkgs.ncurses} \
+          ${pkgs.expat} \
+          ${pkgs.readline} \
+          -name "$libname" -type f 2>/dev/null | head -1)
+        if [ -n "$found" ]; then
+          install -Dm755 "$found" "$out/lib/$libname"
+          copy_needed "$out/lib/$libname"
+        fi
+      done
+    }
+    copy_needed "$realPython"
 
     # ── Launcher ─────────────────────────────────────────────────────────
     cat > $out/bin/meshing-around << 'LAUNCHER'
