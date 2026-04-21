@@ -150,17 +150,17 @@ pkgs.stdenv.mkDerivation {
     fi
     echo "=== using Python ELF: $realPython ==="
 
-    # Install the real ELF as .python3-real, then create a /bin/python3 wrapper
+    # Install the real ELF as python3.bin, then create a /bin/python3 wrapper
     # that sets PYTHONHOME and PYTHONPATH before exec-ing it.
     # This means 'python3 script.py' works correctly regardless of how it is
     # invoked — directly from the shell, from a service script, or via exec().
-    install -Dm755 "$realPython" $out/bin/.python3-real
+    install -Dm755 "$realPython" $out/bin/python3.bin
 
     cat > $out/bin/python3 << 'PYWRAP'
 #!/bin/sh
 export PYTHONHOME=/opt/meshing-around
 export PYTHONPATH=/opt/meshing-around/lib
-exec /bin/.python3-real "$@"
+exec /bin/python3.bin "$@"
 PYWRAP
     chmod +x $out/bin/python3
 
@@ -174,9 +174,9 @@ PYWRAP
       interpName=$(basename "$interp")
       install -Dm755 "$interp" "$out/lib/$interpName"
       # Rewrite the interpreter path in the real ELF (not the wrapper script).
-      patchelf --set-interpreter "/lib/$interpName" $out/bin/.python3-real
+      patchelf --set-interpreter "/lib/$interpName" $out/bin/python3.bin
       # Also set RPATH so the musl linker finds our bundled shared libs in /lib.
-      patchelf --set-rpath "/lib" $out/bin/.python3-real
+      patchelf --set-rpath "/lib" $out/bin/python3.bin
     fi
 
     # Copy every direct shared-library dependency of the Python binary.
