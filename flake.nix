@@ -177,7 +177,7 @@ RUNEOF
         runtimeInputs = with hostPkgs; [ qemu python3 ];
         text = ''
           SSH_PORT=$(python3 -c \
-            "import socket; s=socket.socket(); s.bind(('',0)); \
+            "import socket; s=socket.socket(); s.bind((\"\",0)); \
              print(s.getsockname()[1]); s.close()")
 
           # The Nix store disk is read-only; layer a writable QCOW2 overlay.
