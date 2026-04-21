@@ -36,17 +36,23 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
     pkg-config
   ];
 
-  # RF24's CMakeLists.txt hardcodes add_library(rf24 SHARED …).
-  # The musl ARM32 static toolchain cannot produce shared libs — C++ RTTI
-  # symbols in libstdc++.a use relocations that binutils-arm rejects.
-  # Two passes:
-  #   1. On any add_library line mentioning rf24, flip SHARED → STATIC.
-  #   2. Drop set_target_properties calls that set SOVERSION/VERSION (those
-  #      properties only make sense for shared libs and cause cmake to try
-  #      to create versioned .so symlinks even on a STATIC target).
+  # The RF24 CMakeLists.txt either explicitly declares the library SHARED
+  # or sets BUILD_SHARED_LIBS=ON in a way that overrides the -D flag.
+  # Either way, the musl ARM32 static toolchain cannot produce shared libs —
+  # the C++ RTTI symbols in libstdc++.a use relocations that binutils rejects.
+  #
+  # Fix: replace every occurrence of " SHARED" with " STATIC" across all
+  # CMakeLists.txt files in the tree (catches both uppercase and lowercase
+  # library names), then pass an initial cmake cache file to force the flag.
   postPatch = ''
-    sed -i '/add_library.*rf24/s/SHARED/STATIC/g'  CMakeLists.txt
-    sed -i '/SOVERSION\|set_target_properties.*VERSION/d' CMakeLists.txt
+    find . -name "CMakeLists.txt" | xargs sed -i 's/ SHARED/ STATIC/g'
+  '';
+
+  # An initial cache file overrides even CACHE FORCE variables in CMakeLists.
+  preConfigure = ''
+    cat > "$TMPDIR/rf24-init.cmake" << 'EOF'
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+EOF
   '';
 
   cmakeFlags = [
@@ -54,6 +60,8 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
     "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
     "-DRF24_DRIVER=SPIDEV"
     "-DBUILD_SHARED_LIBS=OFF"
+    # Initial cache file — overrides even CACHE FORCE assignments in CMakeLists.
+    "-C\${TMPDIR}/rf24-init.cmake"
   ];
 
   meta = {
