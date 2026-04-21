@@ -168,6 +168,42 @@ system.usb = {
 The Luckfox RV1103 role switch path (`fcd00000.usb-role-switch`) is
 pre-populated in `hardware/pico-mini-b.nix`. The Ox64 path is auto-detected.
 
+### USB gadget / serial console
+
+When the OTG port is in device mode, the USB gadget stack can expose virtual
+functions to the connected host computer. The most useful for embedded work is
+`acm` — a CDC-ACM virtual serial port that gives you a login shell over USB
+without needing any network.
+
+```nix
+system.usb.mode = "device";   # put the port in device mode first
+
+system.usbGadget = {
+  enable    = true;
+  functions = [ "acm" ];      # "acm" | "ecm" | "rndis" | "mass_storage"
+  product   = "My Luckfox";   # string shown in lsusb on the host
+};
+```
+
+When `"acm"` is in `functions`, a getty is automatically spawned on
+`/dev/ttyGS0` so the device presents a login prompt over the USB serial port.
+On the host, connect with:
+
+```sh
+# Linux
+screen /dev/ttyACM0 115200
+# macOS
+screen /dev/cu.usbmodem* 115200
+```
+
+Multiple functions can be combined if your kernel has the composite gadget
+driver: `functions = [ "acm" "ecm" ]` gives both a serial console and a USB
+Ethernet interface simultaneously.
+
+Requires kernel `CONFIG_USB_GADGET`, `CONFIG_USB_CONFIGFS`, and the
+per-function options (`CONFIG_USB_CONFIGFS_SERIAL` for ACM, etc.). These are
+present in the Luckfox vendor kernel (5.10) when gadget support is enabled.
+
 ### MCU control (`/bin/mcu`)
 
 Toggle GPIO pins via MOSFET to reset or bootload an attached MCU:
@@ -408,6 +444,7 @@ modules/
     sdimage.nix            Flashable SD image builder
     mcu.nix                /bin/mcu GPIO helper
     usb.nix                USB OTG role switch
+    usb-gadget.nix         USB gadget stack (CDC-ACM console, ECM, RNDIS, mass storage)
     firmware.nix           Firmware bundle builder
     image.nix              Raw disk image builder
     uboot.nix              U-Boot integration

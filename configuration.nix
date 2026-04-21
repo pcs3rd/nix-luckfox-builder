@@ -40,8 +40,12 @@ in
   # ── System ──────────────────────────────────────────────────────────────────
 
   # USB OTG port mode — "host" | "device" | "otg" (auto/ID-pin, default)
-  system.usb.mode = "host";
-
+  system.usb.mode = "device";
+  system.usbGadget = {
+    enable    = true;
+    functions = [ "acm" ];
+    product   = "Ox64";
+  };
   # Compressed RAM swap — ~96 MB effective swap on a 64 MB board at near-zero latency.
   system.zram = {
     enable    = true;
@@ -68,12 +72,12 @@ in
   # ── Services ────────────────────────────────────────────────────────────────
 
   services.getty.enable = true;    # serial console on ttyS0
-  services.ssh.enable   = false;   # dropbear SSH; set users.root.hashedPassword first
+  services.ssh.enable   = true;   # dropbear SSH; set users.root.hashedPassword first
 
   # mesh-bbs: minimal Meshtastic BBS + store-and-forward bot.
   # Commands via direct message: bbs list/read/post, snf send/list
   services."mesh-bbs" = {
-    enable        = true;
+    enable        = false;
     interface = {
       type       = "serial";
       serialPort = "/dev/ttyACM0";   # or /dev/ttyUSB0 for UART adapters
@@ -90,7 +94,7 @@ in
   # Setting enable = true installs /bin/nrfnet but does NOT auto-start the daemon.
   # Run manually: nrfnet --primary --spi_device=/dev/spidev0.0 --channel=42
   services.nrfnet = {
-    enable    = true;
+    enable    = false;
     role      = "primary";         # or "secondary"
     spiDevice = "/dev/spidev0.0";
     channel   = 42;

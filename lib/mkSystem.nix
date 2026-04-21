@@ -19,6 +19,7 @@ lib.evalModules {
     ../modules/core/sdimage.nix
     ../modules/core/mcu.nix
     ../modules/core/usb.nix
+    ../modules/core/usb-gadget.nix
     ../modules/services/default.nix
     ../modules/networking/dhcp.nix
   ];

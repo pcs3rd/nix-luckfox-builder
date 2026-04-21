@@ -430,6 +430,71 @@ with lib;
       };
     };
 
+    system.usbGadget = {
+      enable = mkEnableOption ''
+        USB gadget stack (configfs).  Configures the OTG port as a USB
+        peripheral at boot.  The port must be in device mode
+        (system.usb.mode = "device").
+        Requires kernel CONFIG_USB_GADGET and CONFIG_USB_CONFIGFS.
+      '';
+
+      functions = mkOption {
+        type    = types.listOf (types.enum [ "acm" "ecm" "rndis" "mass_storage" ]);
+        default = [ "acm" ];
+        description = ''
+          Gadget functions to expose over USB.  Multiple functions can be
+          combined if the kernel's composite gadget driver is loaded.
+            acm          — CDC-ACM virtual serial port (/dev/ttyGS0 on target,
+                           /dev/ttyACMx on host).  When selected, a getty is
+                           started on /dev/ttyGS0 for a USB login shell.
+            ecm          — CDC-ECM USB Ethernet adapter (Linux/macOS hosts).
+            rndis        — RNDIS USB Ethernet adapter (Windows hosts).
+            mass_storage — USB mass storage backed by massStorageDevice.
+        '';
+      };
+
+      idVendor = mkOption {
+        type    = types.str;
+        default = "0x1d6b";   # Linux Foundation
+        description = "USB Vendor ID (hex string, e.g. \"0x1d6b\").";
+      };
+
+      idProduct = mkOption {
+        type    = types.str;
+        default = "0x0104";   # Multifunction Composite Gadget
+        description = "USB Product ID (hex string, e.g. \"0x0104\").";
+      };
+
+      manufacturer = mkOption {
+        type    = types.str;
+        default = "nix-luckfox-builder";
+        description = "USB manufacturer string visible in lsusb.";
+      };
+
+      product = mkOption {
+        type    = types.str;
+        default = "USB Gadget";
+        description = "USB product string visible in lsusb.";
+      };
+
+      serialNumber = mkOption {
+        type    = types.str;
+        default = "00000001";
+        description = "USB serial number string.";
+      };
+
+      massStorageDevice = mkOption {
+        type    = types.str;
+        default = "/dev/mmcblk0p3";
+        description = ''
+          Block device or image file to expose when "mass_storage" is in functions.
+          WARNING: never expose the running root partition read-write — the host
+          and target would be writing simultaneously, causing filesystem corruption.
+          Use a dedicated partition or set the lun to read-only in the script.
+        '';
+      };
+    };
+
     system.build = {
       rootfs    = mkOption { type = types.path; readOnly = true; };
       initramfs = mkOption { type = types.path; readOnly = true; };
