@@ -31,12 +31,20 @@ in
   };
 
   services.nrfnet = {
-    enable    = true;
+    enable    = false;
     role      = "primary";      # or "secondary"
     spiDevice = "/dev/spidev0.0";
     channel   = 42;
   };
-  services."meshing-around".enable = true;
+  services."meshing-around" = {
+    enable = true;
+    interface = {
+      type       = "serial";
+      serialPort = "/dev/ttyACM0";    # change to /dev/ttyUSB0 for UART adapters
+      # type    = "tcp";              # uncomment for TCP mode
+      # host    = "192.168.1.x";     # IP of a Meshtastic node running the TCP API
+    };
+  };
   services.ssh.enable = false;
   services.getty.enable = true;
   services.meshtasticd = {

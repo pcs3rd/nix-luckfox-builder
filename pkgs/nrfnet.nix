@@ -32,6 +32,11 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
     pkgs.pkgsStatic.tclap
   ];
 
+  # nrfnet's CMakeLists.txt declares cmake_minimum_required < 3.5, which CMake
+  # 3.27+ rejects outright.  This flag tells CMake to apply 3.5 policies anyway
+  # so the build proceeds without touching upstream source.
+  cmakeFlags = [ "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" ];
+
   installPhase = ''
     mkdir -p $out/bin
     cp nrfnet $out/bin/nrfnet

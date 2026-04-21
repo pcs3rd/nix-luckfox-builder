@@ -9,6 +9,49 @@ with lib;
 
       "meshing-around" = {
         enable = mkEnableOption "meshing-around Meshtastic BBS bot";
+
+        interface = {
+          type = mkOption {
+            type        = types.enum [ "serial" "tcp" "ble" ];
+            default     = "serial";
+            description = ''
+              Meshtastic connection type.
+                serial — connect via USB serial (e.g. /dev/ttyACM0 or /dev/ttyUSB0).
+                tcp    — connect over TCP/IP (hostname must be set).
+                ble    — connect via Bluetooth LE (mac must be set).
+            '';
+          };
+
+          serialPort = mkOption {
+            type        = types.str;
+            default     = "/dev/ttyACM0";
+            description = ''
+              Serial device path for the Meshtastic radio.
+              Written to config.ini as [interface] port = ...
+              Only used when interface.type = "serial".
+            '';
+          };
+
+          host = mkOption {
+            type        = types.str;
+            default     = "";
+            description = ''
+              TCP hostname or IP address of the Meshtastic node.
+              Written to config.ini as [interface] hostname = ...
+              Only used when interface.type = "tcp".
+            '';
+          };
+
+          mac = mkOption {
+            type        = types.str;
+            default     = "";
+            description = ''
+              Bluetooth LE MAC address of the Meshtastic radio.
+              Written to config.ini as [interface] mac = ...
+              Only used when interface.type = "ble".
+            '';
+          };
+        };
       };
 
       meshtasticd = {
