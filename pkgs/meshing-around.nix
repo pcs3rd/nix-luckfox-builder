@@ -87,8 +87,6 @@ pkgs.stdenv.mkDerivation {
   dontFixup  = true;   # skip strip/patchelf — Python scripts + a foreign ELF
 
   installPhase = ''
-    set -x   # trace every command so failures are visible in nix log
-
     # ── Application source ────────────────────────────────────────────────
     mkdir -p $out/opt/meshing-around
     cp -r . $out/opt/meshing-around/
@@ -112,12 +110,19 @@ pkgs.stdenv.mkDerivation {
     echo "=== using Python ELF: $realPython ==="
     install -Dm755 "$realPython" $out/bin/python3
 
-    # Copy the ELF interpreter (musl dynamic linker, e.g. ld-musl-armhf.so.1).
-    # patchelf tells us exactly which one this binary was linked against.
+    # Copy the ELF interpreter (musl dynamic linker, e.g. ld-musl-armhf.so.1)
+    # and patch the copied binary to use /lib/<linker> on the target instead of
+    # the hardcoded /nix/store/…/lib/<linker> path.  Without this the kernel
+    # returns ENOENT ("not found") even though the binary file itself exists.
     interp=$(patchelf --print-interpreter "$realPython" 2>/dev/null || true)
     echo "=== ELF interpreter: $interp ==="
     if [ -n "$interp" ] && [ -f "$interp" ]; then
-      install -Dm755 "$interp" "$out/lib/$(basename "$interp")"
+      interpName=$(basename "$interp")
+      install -Dm755 "$interp" "$out/lib/$interpName"
+      # Rewrite the interpreter path in the copied binary to the target path.
+      patchelf --set-interpreter "/lib/$interpName" $out/bin/python3
+      # Also set RPATH so the musl linker finds our bundled shared libs in /lib.
+      patchelf --set-rpath "/lib" $out/bin/python3
     fi
 
     # Copy every direct shared-library dependency of the Python binary.
@@ -140,6 +145,7 @@ pkgs.stdenv.mkDerivation {
           -name "$libname" -type f 2>/dev/null | head -1)
         if [ -n "$found" ]; then
           install -Dm755 "$found" "$out/lib/$libname"
+          patchelf --set-rpath "/lib" "$out/lib/$libname" 2>/dev/null || true
           copy_needed "$out/lib/$libname"
         fi
       done
