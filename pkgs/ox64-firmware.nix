@@ -1,50 +1,35 @@
 # Pre-built kernel + firmware blobs for the Pine64 Ox64 (BL808).
 #
-# These are fetched from the OpenBouffalo buildroot release and pinned by
-# content hash — the same way nixpkgs handles any other pre-built binary.
-# The Nix sandbox validates the hash before allowing the build to proceed,
-# so reproducibility is fully maintained.
+# Fetched from the OpenBouffalo buildroot release and pinned by content hash.
 #
-# ── Updating the hashes ──────────────────────────────────────────────────────
+# ── Release tarball layout (v1.0.1) ──────────────────────────────────────────
 #
-# 1. Browse https://github.com/openbouffalo/buildroot_bouffalo/releases
-#    and find the latest release.
+# The v1.0.1 tarball ships a different layout than early releases:
 #
-# 2. Copy the URL for the defconfig tarball (the file whose name ends in
-#    _full_defconfig.tar.gz) and run:
+#   firmware/
+#     bl808-firmware.bin                      — combined SPI flash image
+#     d0_lowload_bl808_d0.bin                 — D0 (Linux core) pre-loader
+#     m0_lowload_bl808_m0.bin                 — M0 (RTOS/WiFi) pre-loader
+#     sdcard-pine64_ox64_full_defconfig.img.xz — full SD card image
 #
+# The kernel (Image) and DTB live inside the FAT boot partition of the SD
+# card image.  This derivation decompresses the image, finds the FAT
+# partition using sfdisk, and extracts the files via mtools (no root/mount).
+#
+# ── Updating ─────────────────────────────────────────────────────────────────
+#
+# 1. Find the new release at:
+#      https://github.com/openbouffalo/buildroot_bouffalo/releases
+#
+# 2. Update BUILDROOT_REV and get the new hash:
 #      nix-prefetch-url --unpack \
 #        https://github.com/openbouffalo/buildroot_bouffalo/releases/download/\
-#    v1.0.1/bl808-linux-pine64_ox64_full_defconfig.tar.gz
+#        <rev>/bl808-linux-pine64_ox64_full_defconfig.tar.gz
 #
-#    Paste the printed hash into BUILDROOT_SHA256 below.
+#    Or using the flake CLI:
+#      nix store prefetch-file --hash-type sha256 --unpack <url>
 #
-# 3. Update BUILDROOT_REV to the release tag (e.g. "v1.0.1").
-#
-# ── Alternative: mainline Linux ──────────────────────────────────────────────
-#
-# BL808 support landed in Linux 6.6 (CONFIG_ARCH_BOUFFALOLAB=y).
-# A Nix derivation that cross-compiles the kernel from source would look like:
-#
-#   pkgsRv64.linux.override {
-#     defconfig = "ox64_defconfig";   # or a custom config file
-#   }
-#
-# That gives you a fully source-built, reproducible kernel but requires
-# the BL808 device tree to be upstream (it is, since 6.6) and adds
-# significant build time.  The pre-built blob approach below is simpler
-# for getting started.
-#
-# ── What's in the release tarball ────────────────────────────────────────────
-#
-# The buildroot release tarball contains (inside output/images/):
-#   Image                   — compressed RV64 Linux kernel
-#   bl808-pine64-ox64.dtb   — compiled device tree blob
-#   low_load_bl808_d0.bin   — D0 (Linux) pre-loader
-#   low_load_bl808_m0.bin   — M0 (RTOS/WiFi) pre-loader
-#   rootfs.ext2             — buildroot rootfs (not used; we build our own)
-#
-# This derivation extracts just the kernel, DTB, and the two pre-loader blobs.
+# 3. Paste the sri hash (sha256-...) into BUILDROOT_SHA256 below.
 
 { pkgs }:
 
@@ -53,11 +38,7 @@ let
 
   BUILDROOT_REV    = "v1.0.1";
   BUILDROOT_SHA256 = "sha256-/jlQc2OF/4Hpn3KnClHhmvvtZ18AvgWsupr7yihLpwY=";
-  # ↑ SRI hash — update with:
-  #   nix-prefetch-url --unpack https://github.com/openbouffalo/buildroot_bouffalo/releases/download/v1.0.1/bl808-linux-pine64_ox64_full_defconfig.tar.gz
-  #   then convert: nix hash convert --hash-algo sha256 --to sri <base32>
 
-  # The release tarball URL — adjust filename if a newer release changes it.
   src = pkgs.fetchurl {
     url    = "https://github.com/openbouffalo/buildroot_bouffalo/releases/download/${BUILDROOT_REV}/bl808-linux-pine64_ox64_full_defconfig.tar.gz";
     sha256 = BUILDROOT_SHA256;
@@ -66,26 +47,98 @@ let
 in
 
 pkgs.runCommand "ox64-firmware-${BUILDROOT_REV}" {
-  nativeBuildInputs = [ pkgs.buildPackages.gnutar pkgs.buildPackages.gzip ];
+  nativeBuildInputs = with pkgs.buildPackages; [
+    gnutar gzip xz
+    mtools       # mcopy / mdir — FAT image access without mounting
+    util-linux   # sfdisk — partition table parsing
+  ];
 } ''
-  # Unpack the release tarball
-  mkdir -p src
+  mkdir -p src $out
   tar -xzf ${src} -C src
 
-  # Images land in output/images/ relative to the tarball root.
-  IMAGES=$(find src -type d -name images | head -1)
-  if [ -z "$IMAGES" ]; then
-    echo "ERROR: could not find images/ directory in tarball" >&2
-    echo "Contents:" >&2; find src -maxdepth 4 >&2
+  FIRMWARE=$(find src -type d -name firmware | head -1)
+  if [ -z "$FIRMWARE" ]; then
+    echo "ERROR: firmware/ directory not found in tarball" >&2
+    find src -maxdepth 4 >&2
     exit 1
   fi
 
-  mkdir -p $out
-  cp "$IMAGES/Image"                 $out/Image
-  cp "$IMAGES/bl808-pine64-ox64.dtb" $out/bl808-pine64-ox64.dtb
-  cp "$IMAGES/low_load_bl808_d0.bin" $out/low_load_bl808_d0.bin
-  cp "$IMAGES/low_load_bl808_m0.bin" $out/low_load_bl808_m0.bin
+  # ── Pre-loader blobs ───────────────────────────────────────────────────────
+  # The naming convention flipped between releases; handle both.
+  if [ -f "$FIRMWARE/d0_lowload_bl808_d0.bin" ]; then
+    cp "$FIRMWARE/d0_lowload_bl808_d0.bin" "$out/low_load_bl808_d0.bin"
+  elif [ -f "$FIRMWARE/low_load_bl808_d0.bin" ]; then
+    cp "$FIRMWARE/low_load_bl808_d0.bin"   "$out/low_load_bl808_d0.bin"
+  else
+    echo "ERROR: D0 pre-loader not found in $FIRMWARE" >&2; ls "$FIRMWARE" >&2; exit 1
+  fi
+
+  if [ -f "$FIRMWARE/m0_lowload_bl808_m0.bin" ]; then
+    cp "$FIRMWARE/m0_lowload_bl808_m0.bin" "$out/low_load_bl808_m0.bin"
+  elif [ -f "$FIRMWARE/low_load_bl808_m0.bin" ]; then
+    cp "$FIRMWARE/low_load_bl808_m0.bin"   "$out/low_load_bl808_m0.bin"
+  else
+    echo "ERROR: M0 pre-loader not found in $FIRMWARE" >&2; ls "$FIRMWARE" >&2; exit 1
+  fi
+
+  # ── Kernel and DTB from inside the SD card image ───────────────────────────
+  SDIMG_XZ=$(find "$FIRMWARE" -name '*.img.xz' | head -1)
+  if [ -z "$SDIMG_XZ" ]; then
+    echo "ERROR: no .img.xz found in $FIRMWARE" >&2; ls "$FIRMWARE" >&2; exit 1
+  fi
+
+  echo "ox64-firmware: decompressing ''${SDIMG_XZ##*/} ..."
+  xz -dk "$SDIMG_XZ"
+  SDIMG="''${SDIMG_XZ%.xz}"
+
+  # Find the FAT boot partition's start sector.
+  # sfdisk --dump prints lines like: "  start=2048, size=..., type=c"
+  FAT_SECTOR=$(sfdisk -d "$SDIMG" 2>/dev/null \
+    | awk '/start=/{
+        # extract start= value
+        for (i=1; i<=NF; i++) {
+          if ($i ~ /^start=/) {
+            v = substr($i, 7) + 0
+            if (v > 0) { print v; exit }
+          }
+        }
+      }')
+
+  if [ -z "$FAT_SECTOR" ] || [ "$FAT_SECTOR" -eq 0 ]; then
+    echo "WARNING: sfdisk could not find partition; assuming 2048-sector offset" >&2
+    FAT_SECTOR=2048
+  fi
+
+  FAT_OFFSET=$(( FAT_SECTOR * 512 ))
+  echo "ox64-firmware: FAT partition at sector $FAT_SECTOR (byte offset $FAT_OFFSET)"
+
+  export MTOOLS_SKIP_CHECK=1
+
+  # List FAT contents for diagnostics
+  echo "ox64-firmware: FAT partition contents:"
+  mdir -i "$SDIMG@@$FAT_OFFSET" -/ 2>/dev/null || true
+
+  # Extract kernel image
+  if ! mcopy -i "$SDIMG@@$FAT_OFFSET" ::Image "$out/Image" 2>/dev/null; then
+    echo "ERROR: Image not found in FAT partition" >&2; exit 1
+  fi
+
+  # Extract DTB — find any .dtb file in the FAT partition
+  DTB_PATH=$(mdir -b -i "$SDIMG@@$FAT_OFFSET" 2>/dev/null \
+    | grep -i '\.dtb$' | head -1 | sed 's|^::||')
+  if [ -z "$DTB_PATH" ]; then
+    echo "ERROR: no .dtb found in FAT partition" >&2; exit 1
+  fi
+  echo "ox64-firmware: extracting DTB: $DTB_PATH"
+  mcopy -i "$SDIMG@@$FAT_OFFSET" "::$DTB_PATH" "$out/bl808-pine64-ox64.dtb"
+
+  # ── Final verification ────────────────────────────────────────────────────
+  for f in Image bl808-pine64-ox64.dtb low_load_bl808_d0.bin low_load_bl808_m0.bin; do
+    if [ ! -f "$out/$f" ]; then
+      echo "ERROR: $out/$f was not produced" >&2; exit 1
+    fi
+  done
 
   echo "ox64-firmware ${BUILDROOT_REV} unpacked:"
-  ls -lh $out/
+  ls -lh "$out/"
 ''
