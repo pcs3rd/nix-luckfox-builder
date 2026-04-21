@@ -28,10 +28,11 @@
   boot.uboot.enable = lib.mkForce false;
   rockchip.enable   = lib.mkForce false;
 
-  # meshing-around bundles the full Python stdlib (~150 MB uncompressed).
-  # That blows the initramfs RAM budget in QEMU — disable it for the test image.
-  # It is still present in the SD image build via configuration.nix.
-  services."meshing-around".enable = lib.mkForce false;
+  # meshing-around (and its bundled Python) is kept enabled here.
+  # The stdlib trimming in pkgs/meshing-around.nix removes ~45 MB of unused
+  # modules (tkinter, test/, idlelib, lib2to3, …), and QEMU runs at 512 MB,
+  # so the initramfs fits comfortably.  Re-disable with lib.mkForce false if
+  # you ever hit a kernel panic due to initramfs size.
 
   # zram requires kernel modules (/lib/modules/<ver>/…/zram.ko).
   # The QEMU initramfs has no kernel modules tree, so modprobe would fail.
