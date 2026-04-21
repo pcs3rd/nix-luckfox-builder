@@ -29,12 +29,13 @@ let
 in
 
 {
-  config.system.build.sdImage = pkgs.runCommand "sd-flashable.img" {
+  config.system.build.sdImage = pkgs.runCommand "sd-flashable" {
     nativeBuildInputs = with pkgs.buildPackages; [
       e2fsprogs   # mkfs.ext4 with -d flag
       python3     # MBR partition-table writer
     ];
   } ''
+    mkdir -p $out
     IMAGE_MB=${toString config.system.imageSize}
     SECTOR=${toString partStartSector}
     IMAGE_BYTES=$(( IMAGE_MB * 1024 * 1024 ))
@@ -44,7 +45,7 @@ in
     echo "Building flashable SD image (''${IMAGE_MB} MiB)..."
 
     # ── Blank image ─────────────────────────────────────────────────────────
-    dd if=/dev/zero of=$out bs=1M count=$IMAGE_MB 2>/dev/null
+    dd if=/dev/zero of=$out/sd-flashable.img bs=1M count=$IMAGE_MB 2>/dev/null
 
     # ── MBR partition table ─────────────────────────────────────────────────
     # Written with Python so this step works on macOS and Linux alike.
@@ -76,7 +77,7 @@ fd = os.open('mbr.bin', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
 os.write(fd, mbr)
 os.close(fd)
 PYEOF
-    dd if=mbr.bin of=$out bs=1 conv=notrunc 2>/dev/null
+    dd if=mbr.bin of=$out/sd-flashable.img bs=1 conv=notrunc 2>/dev/null
 
     # ── Stage rootfs + kernel + DTB + extlinux.conf ─────────────────────────
     cp -r ${rootfs} staging
@@ -110,22 +111,22 @@ EXTEOF
       part.img
 
     # ── Embed partition into disk image ─────────────────────────────────────
-    dd if=part.img of=$out bs=512 seek=$SECTOR conv=notrunc 2>/dev/null
+    dd if=part.img of=$out/sd-flashable.img bs=512 seek=$SECTOR conv=notrunc 2>/dev/null
 
     # ── Write Rockchip bootloader blobs ─────────────────────────────────────
     # SPL / idbloader at sector 64 (Rockchip boot ROM requirement)
     ${lib.optionalString (spl != null) ''
       echo "Writing SPL at sector 64..."
-      dd if=${spl} of=$out bs=512 seek=64 conv=notrunc 2>/dev/null
+      dd if=${spl} of=$out/sd-flashable.img bs=512 seek=64 conv=notrunc 2>/dev/null
     ''}
 
     # U-Boot proper at sector 16384 (8 MiB)
     ${lib.optionalString (uboot != null) ''
       echo "Writing U-Boot at sector 16384..."
-      dd if=${uboot} of=$out bs=512 seek=16384 conv=notrunc 2>/dev/null
+      dd if=${uboot} of=$out/sd-flashable.img bs=512 seek=16384 conv=notrunc 2>/dev/null
     ''}
 
-    echo "SD image ready: $out"
-    echo "Flash with: dd if=$out of=/dev/sdX bs=4M status=progress"
+    echo "SD image ready: $out/sd-flashable.img"
+    echo "Flash with: dd if=$out/sd-flashable.img of=/dev/sdX bs=4M status=progress"
   '';
 }
