@@ -14,6 +14,7 @@ in
     sysinfo
     htop
     nano
+    nrfnet
   ];
 
   # Vendor kernel modules — required for CONFIG_ZRAM=m and any other =m driver.
