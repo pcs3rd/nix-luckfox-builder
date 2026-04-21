@@ -13,6 +13,7 @@ in
   packages = with localPkgs; [
     sysinfo
     htop
+    nano
   ];
 
   # Vendor kernel modules — required for CONFIG_ZRAM=m and any other =m driver.
