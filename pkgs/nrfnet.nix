@@ -43,7 +43,9 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
 
   installPhase = ''
     mkdir -p $out/bin
-    cp nrfnet $out/bin/nrfnet
+    # The cmake target is named "nerfnet" (the project's internal name).
+    # Install it as "nrfnet" so the service script and users find it at /bin/nrfnet.
+    cp nerfnet/net/nerfnet $out/bin/nrfnet
   '';
 
   meta = {
