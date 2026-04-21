@@ -38,4 +38,5 @@
   # The QEMU initramfs has no kernel modules tree, so modprobe would fail.
   # 512 MB QEMU RAM is ample anyway — disable zram for the initramfs build.
   system.zram.enable = lib.mkForce false;
+
 }

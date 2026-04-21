@@ -32,7 +32,7 @@ in
   };
 
   services.nrfnet = {
-    enable    = false;
+    enable    = true;            # installs /bin/nrfnet; daemon does not auto-start
     role      = "primary";      # or "secondary"
     spiDevice = "/dev/spidev0.0";
     channel   = 42;
