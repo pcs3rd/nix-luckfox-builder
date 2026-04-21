@@ -15,6 +15,7 @@
     ./ssh.nix
     ./getty.nix
     ./meshing-around.nix
+    ./nrfnet.nix
     ./hello.nix
   ];
 }

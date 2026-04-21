@@ -14,7 +14,12 @@ in
     sysinfo
     htop
   ];
-
+  services.nrfnet = {
+    enable    = false;
+    role      = "primary";      # or "secondary"
+    spiDevice = "/dev/spidev0.0";
+    channel   = 42;
+  };
   services."meshing-around".enable = true;
   services.ssh.enable = true;
   services.getty.enable = true;

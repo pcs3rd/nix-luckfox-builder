@@ -16,4 +16,5 @@
   sysinfo = import ./sysinfo/sysinfo.nix { inherit pkgs; };
   htop    = import ./htop.nix    { inherit pkgs; };
   meshing-around = import ./meshing-around.nix  { inherit pkgs; };
+  nrfnet         = import ./nrfnet.nix           { inherit pkgs; };
 }

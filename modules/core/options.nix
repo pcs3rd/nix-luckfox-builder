@@ -11,6 +11,34 @@ with lib;
         enable = mkEnableOption "meshing-around Meshtastic BBS bot";
       };
 
+      nrfnet = {
+        enable = mkEnableOption "nrfnet TUN/TAP tunnel over nRF24L01+";
+
+        role = mkOption {
+          type        = types.enum [ "primary" "secondary" ];
+          default     = "primary";
+          description = "Node role: primary initiates the tunnel, secondary listens.";
+        };
+
+        spiDevice = mkOption {
+          type        = types.str;
+          default     = "/dev/spidev0.0";
+          description = "SPI device connected to the nRF24L01+ module.";
+        };
+
+        channel = mkOption {
+          type        = types.int;
+          default     = 0;
+          description = "RF channel (0–125) shared between primary and secondary.";
+        };
+
+        extraArgs = mkOption {
+          type        = types.listOf types.str;
+          default     = [];
+          description = "Additional arguments passed verbatim to the nrfnet binary.";
+        };
+      };
+
       getty = {
         enable = mkEnableOption "getty";
         tty = mkOption {
