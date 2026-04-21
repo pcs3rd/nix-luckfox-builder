@@ -11,6 +11,26 @@ with lib;
         enable = mkEnableOption "meshing-around Meshtastic BBS bot";
       };
 
+      meshtasticd = {
+        enable = mkEnableOption "meshtasticd Meshtastic Linux-native daemon";
+
+        configFile = mkOption {
+          type        = types.nullOr types.path;
+          default     = null;
+          description = ''
+            Path to a meshtasticd config.yaml to install at
+            /etc/meshtasticd/config.yaml.  When null the default template
+            shipped by the package is used.
+          '';
+        };
+
+        extraArgs = mkOption {
+          type        = types.listOf types.str;
+          default     = [];
+          description = "Additional arguments passed verbatim to meshtasticd.";
+        };
+      };
+
       nrfnet = {
         enable = mkEnableOption "nrfnet TUN/TAP tunnel over nRF24L01+";
 

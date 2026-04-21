@@ -18,5 +18,6 @@
   htop                   = import ./htop.nix                   { inherit pkgs; };
   nano                   = import ./nano.nix                   { inherit pkgs; };
   meshing-around         = import ./meshing-around.nix         { inherit pkgs; };
+  meshtasticd            = import ./meshtasticd.nix            { inherit pkgs; };
   nrfnet                 = import ./nrfnet.nix                 { inherit pkgs; };
 }
