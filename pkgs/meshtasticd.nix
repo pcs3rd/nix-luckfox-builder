@@ -33,8 +33,8 @@ let
 
   # ── Pin these to the firmware release you want to run ──────────────────────
   # Run:  nix-prefetch-github meshtastic firmware --rev v2.5.X
-  FIRMWARE_REV    = "REPLACE_WITH_REAL_REV";
-  FIRMWARE_SHA256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  FIRMWARE_REV    = "d50caf231bd93ce45182bf20bcb4a070a15ee670";
+  FIRMWARE_SHA256 = "sha256-NSsKxlFW5ai4j/blGrvEuAZVe5LsIe9fSDsFbTUdY0M=";
 
 in
 
