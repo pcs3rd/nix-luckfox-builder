@@ -39,7 +39,7 @@ in
   services.ssh.enable = false;
   services.getty.enable = true;
   services.meshtasticd = {
-    enable     = true;
+    enable     = false;
     #configFile = ./meshtasticd-config.yaml;   # or omit to use the built-in template
   };
   networking = {
