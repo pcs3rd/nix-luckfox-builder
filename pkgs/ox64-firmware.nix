@@ -52,9 +52,10 @@ let
   lib = pkgs.lib;
 
   BUILDROOT_REV    = "v1.0.1";
-  BUILDROOT_SHA256 = "073p6dqcnbxhza152zp6qgs6kzmjqw3k6bkd2cz0is8v6c7shxzw";
-  # ↑ Replace with the output of:
+  BUILDROOT_SHA256 = "sha256-/jlQc2OF/4Hpn3KnClHhmvvtZ18AvgWsupr7yihLpwY=";
+  # ↑ SRI hash — update with:
   #   nix-prefetch-url --unpack https://github.com/openbouffalo/buildroot_bouffalo/releases/download/v1.0.1/bl808-linux-pine64_ox64_full_defconfig.tar.gz
+  #   then convert: nix hash convert --hash-algo sha256 --to sri <base32>
 
   # The release tarball URL — adjust filename if a newer release changes it.
   src = pkgs.fetchurl {
