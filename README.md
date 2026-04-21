@@ -14,4 +14,3 @@
 
 Test in Qemu:
 nix build .#qemu-test
-

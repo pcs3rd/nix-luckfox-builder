@@ -185,7 +185,10 @@ PYWRAP
       local elf="$1"
       patchelf --print-needed "$elf" 2>/dev/null | while read -r libname; do
         [ -f "$out/lib/$libname" ] && continue
-        found=$(find \
+        # -L: follow symlinks — in the Nix store versioned .so files like
+        # libz.so.1.x.x are real files while libz.so.1 is a symlink.
+        # Without -L, -type f won't match the symlink and the library is missed.
+        found=$(find -L \
           ${python} \
           ${pkgs.zlib} \
           ${pkgs.libffi} \
