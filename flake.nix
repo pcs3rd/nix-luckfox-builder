@@ -61,6 +61,23 @@
       pkgsRv64 = import nixpkgs {
         inherit system;
         crossSystem = { config = "riscv64-unknown-linux-musl"; };
+        overlays = [
+          (final: prev: {
+            # ── Tcl cross-compilation fix ───────────────────────────────────
+            # When cross-compiling from macOS, Tcl's configure incorrectly
+            # stamps -DMAC_OSX_TCL=1 into config.h and enables the macOS
+            # compat/mkstemp.c shim.  That shim is missing #include <string.h>
+            # (upstream bug), causing a hard build error on riscv64-musl:
+            #   mkstemp.c: error: implicit declaration of function 'strlen'
+            # Patch in the missing include so the build completes.
+            tcl = prev.tcl.overrideAttrs (old: {
+              postPatch = (old.postPatch or "") + ''
+                sed -i 's|#include <unistd.h>|#include <unistd.h>\n#include <string.h>|' \
+                  compat/mkstemp.c
+              '';
+            });
+          })
+        ];
       };
 
       mkSystem   = import ./lib/mkSystem.nix { inherit pkgs;    lib = pkgs.lib;    };
