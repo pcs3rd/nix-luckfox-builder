@@ -45,23 +45,31 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
   # CMakeLists.txt files in the tree (catches both uppercase and lowercase
   # library names), then pass an initial cmake cache file to force the flag.
   postPatch = ''
+    # Force every library target to be STATIC — the musl ARM32 toolchain
+    # cannot link C++ RTTI from libstdc++.a into a shared object.
     find . -name "CMakeLists.txt" | xargs sed -i 's/ SHARED/ STATIC/g'
-  '';
 
-  # An initial cache file overrides even CACHE FORCE variables in CMakeLists.
-  preConfigure = ''
-    cat > "$TMPDIR/rf24-init.cmake" << 'EOF'
+    # Disable CPack packaging — it looks for dpkg/rpmbuild which are absent
+    # in the Nix sandbox and causes configure to abort.
+    find . \( -name "CMakeLists.txt" -o -name "*.cmake" \) | \
+      xargs sed -i '/include(CPack)/d'
+
+    # Write a cmake initial-cache file that wins over any CACHE FORCE in the
+    # project's own CMakeLists.txt (cmake -C is processed before any cmake_minimum_required).
+    cat > init-cache.cmake << 'EOF'
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(PACK OFF CACHE BOOL "" FORCE)
 EOF
   '';
 
   cmakeFlags = [
-    # Use the Linux SPIDEV driver — no WiringPi / pigpio / mraa dependency.
     "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
     "-DRF24_DRIVER=SPIDEV"
     "-DBUILD_SHARED_LIBS=OFF"
-    # Initial cache file — overrides even CACHE FORCE assignments in CMakeLists.
-    "-C\${TMPDIR}/rf24-init.cmake"
+    "-DPACK=OFF"
+    # -C path is relative to where cmake is invoked (the build dir),
+    # so ../init-cache.cmake reaches the file we wrote in the source tree.
+    "-C../init-cache.cmake"
   ];
 
   meta = {
