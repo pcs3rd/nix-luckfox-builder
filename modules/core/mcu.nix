@@ -69,11 +69,11 @@ let
     }
 
     # ── Commands ──────────────────────────────────────────────────────────────
-    CMD="${1:-}"
+    CMD="''${1:-}"
     case "$CMD" in
 
       reset)
-        echo "mcu: reset (GPIO $RESET_PIN, active LOW for ${PRESS_MS} ms)"
+        echo "mcu: reset (GPIO $RESET_PIN, active LOW for ''${PRESS_MS} ms)"
         gpio_press "$RESET_PIN"
         echo "mcu: done"
         ;;
