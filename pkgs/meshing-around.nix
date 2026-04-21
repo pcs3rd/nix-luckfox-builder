@@ -204,8 +204,19 @@ PYWRAP
         fi
       done
     }
-    echo "=== bundling shared libs ==="
+    echo "=== bundling shared libs for Python binary ==="
     copy_needed "$realPython"
+
+    # C extension modules (.so files under lib-dynload/ and site-packages) have
+    # their own shared library deps that the Python binary itself doesn't pull in
+    # directly (e.g. _ctypes.so → libffi, _ssl.so → libssl/libcrypto).
+    # Walk every .so in the bundled tree and collect their deps too.
+    echo "=== bundling shared libs for C extension modules ==="
+    find "$out/opt/meshing-around/lib" -name '*.so*' -type f | \
+      while read -r so; do
+        copy_needed "$so"
+      done
+
     echo "=== lib contents ==="
     ls $out/lib/ || true
 
