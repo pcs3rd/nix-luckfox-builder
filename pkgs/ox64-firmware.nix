@@ -37,87 +37,114 @@ let
     sha256 = BUILDROOT_SHA256;
   };
 
-  # Python script that parses an MBR or GPT disk image and prints the start
-  # sector of the first FAT / general-purpose partition.  Works on any host OS.
+  # Python script that locates the first FAT partition in an MBR or GPT disk
+  # image.  Portable: works on macOS and Linux without sfdisk/fdisk.
   findFatSector = pkgs.writeText "find-fat-sector.py" ''
     #!/usr/bin/env python3
     """
-    Print the start sector (LBA) of the first usable partition in a disk image.
-    Supports MBR (including extended) and GPT.  Falls back to scanning for a
-    FAT boot-sector signature if the partition table can't be parsed.
+    Print the start sector (LBA) of the first FAT partition in a disk image.
+    Checks GPT and MBR partition tables, verifying each candidate with a FAT
+    boot-sector signature check.  Falls back to brute-force scanning.
     """
     import struct, sys, os
 
     SECTOR = 512
     img = sys.argv[1]
 
-    FAT_MBR_TYPES = {0x01, 0x04, 0x06, 0x0b, 0x0c, 0x0e,
-                     0x1b, 0x1c, 0x1e, 0x82, 0x83, 0x8e}  # include Linux types
-
     def is_fat(f, lba):
-        """Return True if the sector at lba looks like a FAT boot sector."""
+        """Return True if the 512-byte sector at lba is a FAT boot sector."""
         try:
-            f.seek(lba * SECTOR + 54)
-            sig = f.read(3)
-            return sig in (b'FAT', b'FAT')
+            f.seek(lba * SECTOR)
+            s = f.read(SECTOR)
+            if len(s) < 512 or s[510:512] != b'\x55\xAA':
+                return False
+            # FAT12/FAT16: OEM name area at 54; FAT32: at 82
+            return s[54:57] == b'FAT' or s[82:87] == b'FAT32'
         except Exception:
             return False
 
     with open(img, 'rb') as f:
         mbr = f.read(SECTOR)
-
         if len(mbr) < SECTOR:
-            sys.exit("ERROR: image too small")
+            sys.exit(1)
 
-        # ── GPT ──────────────────────────────────────────────────────────────
+        # ── GPT ───────────────────────────────────────────────────────────────
+        # Protective MBR has partition type 0xEE at the first entry.
         if mbr[446 + 4] == 0xEE:
             f.seek(SECTOR)
             gpt = f.read(92)
             if gpt[:8] == b'EFI PART':
                 pe_lba = struct.unpack_from('<Q', gpt, 72)[0]
-                pe_num = struct.unpack_from('<I', gpt, 80)[0]
-                pe_sz  = struct.unpack_from('<I', gpt, 84)[0]
-                pe_sz  = max(pe_sz, 128)
+                pe_num = min(struct.unpack_from('<I', gpt, 80)[0], 128)
+                pe_sz  = max(struct.unpack_from('<I', gpt, 84)[0], 128)
+
                 f.seek(pe_lba * SECTOR)
-                entries = f.read(pe_num * pe_sz)
+                raw = f.read(pe_num * pe_sz)
+
+                starts = []
                 for i in range(pe_num):
-                    e = entries[i*pe_sz:(i+1)*pe_sz]
+                    e = raw[i*pe_sz:(i+1)*pe_sz]
                     if len(e) < 48:
                         break
                     start = struct.unpack_from('<Q', e, 32)[0]
-                    if start > 0:
-                        print(start)
+                    end   = struct.unpack_from('<Q', e, 40)[0]
+                    if start > 0 and end > start:
+                        starts.append(start)
+
+                print(f"DEBUG GPT partitions: {starts}", file=sys.stderr)
+
+                # Prefer whichever partition has a FAT filesystem
+                for s in starts:
+                    if is_fat(f, s):
+                        print(f"DEBUG FAT found at sector {s}", file=sys.stderr)
+                        print(s)
                         sys.exit(0)
 
-        # ── MBR ──────────────────────────────────────────────────────────────
+                # No FAT found — the Ox64 first partition is a raw BL808 boot
+                # partition; the kernel is typically on the second partition.
+                if len(starts) >= 2:
+                    print(f"DEBUG no FAT found, using partition 2 at {starts[1]}", file=sys.stderr)
+                    print(starts[1])
+                    sys.exit(0)
+                elif starts:
+                    print(starts[0])
+                    sys.exit(0)
+
+        # ── MBR ───────────────────────────────────────────────────────────────
         if mbr[510:512] == b'\x55\xAA':
+            FAT_TYPES = {0x01, 0x04, 0x06, 0x0b, 0x0c, 0x0e, 0x1b, 0x1c, 0x1e}
+            parts = []
             for i in range(4):
-                e = mbr[446 + i*16 : 446 + (i+1)*16]
+                e = mbr[446 + i*16 : 446 + i*16 + 16]
                 ptype = e[4]
                 start = struct.unpack_from('<I', e, 8)[0]
                 size  = struct.unpack_from('<I', e, 12)[0]
                 if start > 0 and size > 0 and ptype != 0:
-                    print(start)
-                    sys.exit(0)
+                    parts.append((ptype, start))
 
-        # ── Fallback: scan for FAT boot-sector signature ──────────────────────
+            print(f"DEBUG MBR partitions: {parts}", file=sys.stderr)
+
+            for ptype, start in parts:
+                if ptype in FAT_TYPES:
+                    print(start); sys.exit(0)
+            for ptype, start in parts:
+                if is_fat(f, start):
+                    print(start); sys.exit(0)
+            if parts:
+                print(parts[0][1]); sys.exit(0)
+
+        # ── Brute-force: scan common sector offsets for FAT signature ─────────
         img_size = os.path.getsize(img)
-        for candidate in [2048, 4096, 8192, 1, 63]:
-            offset = candidate * SECTOR
-            if offset + SECTOR > img_size:
+        for candidate in [2048, 4096, 8192, 16384, 32768, 65536, 131072, 1, 63]:
+            if candidate * SECTOR + SECTOR > img_size:
                 continue
-            f.seek(offset + 54)
-            sig = f.read(5)
-            if sig[:3] == b'FAT':
-                print(candidate)
-                sys.exit(0)
-            f.seek(offset + 82)
-            sig2 = f.read(5)
-            if sig2[:5] == b'FAT32':
+            if is_fat(f, candidate):
+                print(f"DEBUG brute-force FAT at sector {candidate}", file=sys.stderr)
                 print(candidate)
                 sys.exit(0)
 
-        sys.exit("ERROR: could not determine partition start sector")
+    print("ERROR: no FAT partition found", file=sys.stderr)
+    sys.exit(1)
   '';
 
 in
