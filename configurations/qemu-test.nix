@@ -32,4 +32,9 @@
   # That blows the initramfs RAM budget in QEMU — disable it for the test image.
   # It is still present in the SD image build via configuration.nix.
   services."meshing-around".enable = lib.mkForce false;
+
+  # zram requires kernel modules (/lib/modules/<ver>/…/zram.ko).
+  # The QEMU initramfs has no kernel modules tree, so modprobe would fail.
+  # 512 MB QEMU RAM is ample anyway — disable zram for the initramfs build.
+  system.zram.enable = lib.mkForce false;
 }

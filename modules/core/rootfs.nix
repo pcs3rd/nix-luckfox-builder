@@ -5,6 +5,15 @@
   config.system.build.rootfs = pkgs.runCommand "rootfs" {} ''
     mkdir -p $out/{bin,sbin,etc,proc,sys,dev,root,lib,var/log,mnt,newroot}
 
+    # ── Kernel modules ─────────────────────────────────────────────────────
+    # Copy /lib/modules/<ver>/ so that modprobe can load kernel modules
+    # (e.g. zram) at runtime.  Set device.kernelModulesPath to a derivation
+    # that provides a lib/modules/ tree (see pkgs/luckfox-kernel-modules.nix).
+    ${lib.optionalString (config.device.kernelModulesPath != null) ''
+      mkdir -p $out/lib/modules
+      cp -rL ${config.device.kernelModulesPath}/. $out/lib/modules/
+    ''}
+
     # ── busybox ────────────────────────────────────────────────────────────
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox $out/bin/
     chmod +x $out/bin/busybox

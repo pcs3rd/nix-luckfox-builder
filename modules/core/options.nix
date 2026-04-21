@@ -211,6 +211,18 @@ with lib;
         default     = null;
         description = "Path to the device tree blob. Required for SD image builds.";
       };
+      kernelModulesPath = mkOption {
+        type        = types.nullOr types.path;
+        default     = null;
+        description = ''
+          Path to a kernel lib/modules directory to include in the rootfs.
+          The directory must contain a subdirectory named after the kernel version
+          (e.g. lib/modules/5.10.110+/).  modprobe will find modules there at runtime.
+
+          Example — using the luckfox-kernel-modules package:
+            device.kernelModulesPath = "''${localPkgs.luckfox-kernel-modules}/lib/modules";
+        '';
+      };
     };
 
     system.build = {

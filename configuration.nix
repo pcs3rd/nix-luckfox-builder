@@ -14,6 +14,12 @@ in
     sysinfo
     htop
   ];
+
+  # Vendor kernel modules — required for CONFIG_ZRAM=m and any other =m driver.
+  # Uncomment once you have verified the luckfox-kernel-modules build succeeds:
+  #   nix build .#packages.aarch64-darwin.pico-mini-b  (triggers the build)
+  #
+  # device.kernelModulesPath = "${localPkgs.luckfox-kernel-modules}/lib/modules";
   # Compressed RAM swap — gives ~96 MB of effective swap on a 64 MB board.
   # lz4 is fast enough that even a Cortex-A7 barely notices the overhead.
   system.zram = {

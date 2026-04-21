@@ -20,8 +20,17 @@
       enable = true;
       action = "sysinit";   # runs early, blocks until swapon completes
       script = ''
-        # Load the zram kernel module.
-        modprobe zram || { echo "zram: modprobe failed" >&2; exit 1; }
+        # zram may be compiled into the kernel (CONFIG_ZRAM=y) or as a module
+        # (CONFIG_ZRAM=m).  Check for the device node first; only try modprobe
+        # if it isn't already present.  Vendor kernels typically have it built-in.
+        if [ ! -e /dev/zram0 ]; then
+          modprobe zram 2>/dev/null || true
+        fi
+
+        if [ ! -e /dev/zram0 ]; then
+          echo "zram: /dev/zram0 not available — kernel may lack zram support" >&2
+          exit 0   # non-fatal: continue boot without swap
+        fi
 
         # Set compression algorithm before sizing the device.
         echo ${config.system.zram.algorithm} > /sys/block/zram0/comp_algorithm
