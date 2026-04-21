@@ -1,3 +1,14 @@
+# nix-luckfox-builder — main system configuration
+#
+# This file is the single place to customise the firmware image.
+# It is imported by both the real-hardware build and the QEMU test configs.
+#
+# After editing, rebuild with:
+#   nix build .#packages.aarch64-darwin.pico-mini-b
+# or flash directly:
+#   nix build .#packages.aarch64-darwin.sdImage-flashable
+#   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
+
 { pkgs, ... }:
 
 let
@@ -9,63 +20,117 @@ in
     ./hardware/pico-mini-b.nix
   ];
 
-  # Extra packages — add your own derivations from pkgs/ here.
+  # ── Extra packages ──────────────────────────────────────────────────────────
+  # Binaries from each package's bin/ are copied into /bin on the rootfs.
+  # Prefer pkgs.pkgsStatic.foo — static binaries need no dynamic linker.
   packages = with localPkgs; [
-    sysinfo
-    htop
-    nano
+    sysinfo        # lightweight system-info utility (static)
+    htop           # interactive process viewer
+    nano           # text editor
+    meshtastic-cli # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
     # nrfnet is added automatically when services.nrfnet.enable = true
   ];
 
-  # Vendor kernel modules — required for CONFIG_ZRAM=m and any other =m driver.
+  # ── Kernel modules ──────────────────────────────────────────────────────────
+  # Required for CONFIG_ZRAM=m and any other =m driver.
   # Uncomment once you have verified the luckfox-kernel-modules build succeeds:
-  #   nix build .#packages.aarch64-darwin.pico-mini-b  (triggers the build)
-  #
+  #   nix build .#packages.aarch64-darwin.pico-mini-b
   # device.kernelModulesPath = "${localPkgs.luckfox-kernel-modules}/lib/modules";
-  # Compressed RAM swap — gives ~96 MB of effective swap on a 64 MB board.
-  # lz4 is fast enough that even a Cortex-A7 barely notices the overhead.
-  
+
+  # ── System ──────────────────────────────────────────────────────────────────
+
+  # USB OTG port mode — "host" | "device" | "otg" (auto/ID-pin, default)
+  system.usb.mode = "host";
+
+  # Compressed RAM swap — ~96 MB effective swap on a 64 MB board at near-zero latency.
   system.zram = {
     enable    = true;
     size      = "32M";
     algorithm = "lz4";
   };
 
-  services.nrfnet = {
-    enable    = true;            # installs /bin/nrfnet; daemon does not auto-start
-    role      = "primary";      # or "secondary"
-    spiDevice = "/dev/spidev0.0";
-    channel   = 42;
-  };
-  services."meshing-around" = {
-    enable = true;
-    interface = {
-      type       = "serial";
-      serialPort = "/dev/ttyACM0";    # change to /dev/ttyUSB0 for UART adapters
-      # type    = "tcp";              # uncomment for TCP mode
-      # host    = "192.168.1.x";     # IP of a Meshtastic node running the TCP API
-    };
-  };
-  services.ssh.enable = false;
-  services.getty.enable = true;
-  services.meshtasticd = {
-    enable     = false;
-    #configFile = ./meshtasticd-config.yaml;   # or omit to use the built-in template
-  };
-  networking = {
-    dhcp.enable = true;
-    hostname = "luckfox";
+  # MCU control — toggle GPIO pins via MOSFET to reset/bootload an attached MCU.
+  system.mcu = {
+    enable        = true;
+    resetPin      = 47;   # GPIO connected to the RESET MOSFET gate
+    bootloaderPin = -1;   # -1 = double-tap reset (RP2040); set for BOOT pin (STM32/nRF)
   };
 
+  # ── Bootloader ──────────────────────────────────────────────────────────────
   boot.uboot = {
     enable  = true;
     spl     = "${localPkgs.uboot}/SPL";
-    package = "${localPkgs.uboot}/u-boot.img";   # Rockchip build produces u-boot.img (FIT image)
+    package = "${localPkgs.uboot}/u-boot.img";
   };
 
   rockchip.enable = true;
 
-  # Root password — generate a new hash with: openssl passwd -6 yourpassword
-  # The default "!" locks the account entirely (no login without a hash set).
-  users.root.hashedPassword = "$6$vW4NFpymQUO5omMq$Z1vcrtaS7bawg02BETzqGTpy35wWgqPMBeFKua6KyETDPUlEVvEldJ8EiR931L1UXnLMlBb/PgGhbnPnVo1/81"; # is `1234`
+  # ── Services ────────────────────────────────────────────────────────────────
+
+  services.getty.enable = true;    # serial console on ttyS0
+  services.ssh.enable   = false;   # dropbear SSH; set users.root.hashedPassword first
+
+  # mesh-bbs: minimal Meshtastic BBS + store-and-forward bot.
+  # Commands via direct message: bbs list/read/post, snf send/list
+  services."mesh-bbs" = {
+    enable        = true;
+    interface = {
+      type       = "serial";
+      serialPort = "/dev/ttyACM0";   # or /dev/ttyUSB0 for UART adapters
+      # type     = "tcp";
+      # host     = "192.168.1.x";
+    };
+    channel       = 0;     # Meshtastic channel index to monitor (0-7)
+    listLimit     = 10;    # max posts shown by `bbs list`
+    maxMessageLen = 200;   # bytes per outgoing LoRa chunk (max ~230)
+    dataDir       = "/var/lib/mesh-bbs";
+  };
+
+  # nrfnet: TUN/TAP tunnel over nRF24L01+.
+  # Setting enable = true installs /bin/nrfnet but does NOT auto-start the daemon.
+  # Run manually: nrfnet --primary --spi_device=/dev/spidev0.0 --channel=42
+  services.nrfnet = {
+    enable    = true;
+    role      = "primary";         # or "secondary"
+    spiDevice = "/dev/spidev0.0";
+    channel   = 42;
+  };
+
+  # meshing-around: full-featured Meshtastic BBS bot (weather, games, APRS, …).
+  # Disabled by default — use mesh-bbs above for a leaner alternative.
+  services."meshing-around" = {
+    enable = false;
+    interface = {
+      type       = "serial";
+      serialPort = "/dev/ttyACM0";
+      # type     = "tcp";
+      # host     = "192.168.1.x";
+    };
+  };
+
+  # meshtasticd: Linux-native Meshtastic daemon (runs a full mesh node on the SBC).
+  services.meshtasticd = {
+    enable = false;
+    # configFile = ./meshtasticd-config.yaml;   # omit to use built-in template
+  };
+
+  # companion-satellite: Bitfocus Companion peripheral client.
+  # Connects USB HID devices (Stream Deck, etc.) to a remote Companion server.
+  # See pkgs/companion-satellite.nix for the one-time hash setup step.
+  services.companion-satellite = {
+    enable = false;
+    host   = "companion.local";   # hostname or IP of your Companion server
+    port   = 16622;
+  };
+
+  # ── Networking ──────────────────────────────────────────────────────────────
+  networking = {
+    dhcp.enable = true;
+    hostname    = "luckfox";
+  };
+
+  # ── Users ───────────────────────────────────────────────────────────────────
+  # Generate a new hash with:  openssl passwd -6 yourpassword
+  # The default "!" locks the root account (no password login).
+  users.root.hashedPassword = "$6$vW4NFpymQUO5omMq$Z1vcrtaS7bawg02BETzqGTpy35wWgqPMBeFKua6KyETDPUlEVvEldJ8EiR931L1UXnLMlBb/PgGhbnPnVo1/81"; # password: 1234
 }

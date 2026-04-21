@@ -51,13 +51,31 @@
         crossSystem = { config = "armv7l-unknown-linux-musleabihf"; };
       };
 
-      mkSystem = import ./lib/mkSystem.nix { inherit pkgs; lib = pkgs.lib; };
+      # ── Cross-compilation packages for Pine64 Ox64 (BL808 RV64 musl) ────────
+      #
+      # The BL808's Linux core is an RV64GCV (C906) @ 480 MHz.  We target
+      # riscv64-unknown-linux-musl, the same musl-first strategy as ARMv7.
+      #
+      # NOTE: riscv64 packages in nixpkgs-unstable are less aggressively cached
+      # than ARM.  Expect longer first-time build times on a cold Nix store.
+      pkgsRv64 = import nixpkgs {
+        inherit system;
+        crossSystem = { config = "riscv64-unknown-linux-musl"; };
+      };
+
+      mkSystem   = import ./lib/mkSystem.nix { inherit pkgs;    lib = pkgs.lib;    };
+      mkSystemRv = import ./lib/mkSystem.nix { pkgs = pkgsRv64; lib = pkgsRv64.lib; };
 
       # ── System evaluations ──────────────────────────────────────────────────
-      picoMiniB         = mkSystem { configuration = ./configuration.nix; };
-      picoMiniB-qemu    = mkSystem { configuration = ./configurations/qemu-test.nix; };
-      picoMiniB-vm      = mkSystem { configuration = ./configurations/qemu-vm.nix; };
-      picoMiniB-sdimage = mkSystem { configuration = ./configurations/sdimage.nix; };
+      picoMiniB         = mkSystem   { configuration = ./configuration.nix;          };
+      picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix; };
+      picoMiniB-vm      = mkSystem   { configuration = ./configurations/qemu-vm.nix;   };
+      picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;   };
+
+      # Pine64 Ox64 — RISC-V 64-bit (BL808 C906 core)
+      # Build: nix build .#packages.<system>.ox64
+      # See hardware/ox64.nix for kernel/dtb setup instructions.
+      ox64 = mkSystemRv { configuration = ./configurations/ox64.nix; };
 
       # ── QEMU runner (initramfs) ──────────────────────────────────────────────
       qemu-test = hostPkgs.writeShellApplication {
@@ -282,6 +300,12 @@ RUNEOF
         qemu-vm-disk      = qemu-vm-disk;    # standalone QCOW2
         qemu-vm-bundle    = qemu-vm-bundle;  # QCOW2 + kernel + run.sh
         qemu-vm           = qemu-vm;         # ephemeral-overlay launcher
+
+        # Pine64 Ox64 (BL808 RV64 musl) — see configurations/ox64.nix
+        # Fill in BUILDROOT_SHA256 in pkgs/ox64-firmware.nix before building.
+        ox64-firmware     = import ./pkgs/ox64-firmware.nix { pkgs = hostPkgs; };
+        ox64-rootfs       = ox64.config.system.build.rootfs;
+        ox64-image        = ox64.config.system.build.image;
       };
 
       apps = {

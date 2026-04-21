@@ -74,6 +74,91 @@ with lib;
         };
       };
 
+      "mesh-bbs" = {
+        enable = mkEnableOption "mesh-bbs minimal Meshtastic BBS + store-and-forward bot";
+
+        interface = {
+          type = mkOption {
+            type        = types.enum [ "serial" "tcp" ];
+            default     = "serial";
+            description = ''
+              Meshtastic connection type.
+                serial — connect via USB serial (e.g. /dev/ttyACM0 or /dev/ttyUSB0).
+                tcp    — connect over TCP/IP (host must be set).
+            '';
+          };
+
+          serialPort = mkOption {
+            type        = types.str;
+            default     = "/dev/ttyACM0";
+            description = "Serial device path for the Meshtastic radio. Only used when type = serial.";
+          };
+
+          host = mkOption {
+            type        = types.str;
+            default     = "";
+            description = "TCP hostname or IP of the Meshtastic node. Only used when type = tcp.";
+          };
+        };
+
+        channel = mkOption {
+          type        = types.int;
+          default     = 0;
+          description = ''
+            Meshtastic channel index (0-7) to monitor for BBS/SNF commands.
+            The bot only responds to direct messages received on this channel.
+            Node-presence tracking and store-and-forward delivery are channel-agnostic:
+            a node coming online on any channel will still receive its queued messages.
+          '';
+        };
+
+        listLimit = mkOption {
+          type        = types.int;
+          default     = 10;
+          description = ''
+            Maximum number of posts shown by the `bbs list` command.
+            Keep this low enough that the reply fits in a handful of LoRa packets.
+          '';
+        };
+
+        maxMessageLen = mkOption {
+          type        = types.int;
+          default     = 200;
+          description = ''
+            Maximum bytes per outgoing message chunk.
+            Meshtastic LoRa payloads are at most 237 bytes; leaving headroom for
+            framing overhead means 200 is a safe default.  Increase to ~230 on
+            high-bandwidth channels (WiFi mesh), decrease on congested networks.
+          '';
+        };
+
+        dataDir = mkOption {
+          type        = types.str;
+          default     = "/var/lib/mesh-bbs";
+          description = ''
+            Directory where BBS posts and store-and-forward queues are stored
+            as JSON files.  Must be writable at runtime; typically on the
+            overlay partition when using sdOverlay.
+          '';
+        };
+      };
+
+      companion-satellite = {
+        enable = mkEnableOption "Bitfocus Companion Satellite client";
+
+        host = mkOption {
+          type        = types.str;
+          default     = "companion.local";
+          description = "Hostname or IP address of the main Companion server to connect to.";
+        };
+
+        port = mkOption {
+          type        = types.int;
+          default     = 16622;
+          description = "TCP port of the Companion server's satellite listener (default: 16622).";
+        };
+      };
+
       nrfnet = {
         enable = mkEnableOption "nrfnet TUN/TAP tunnel over nRF24L01+";
 
@@ -284,6 +369,63 @@ with lib;
 
           Example — using the luckfox-kernel-modules package:
             device.kernelModulesPath = "''${localPkgs.luckfox-kernel-modules}/lib/modules";
+        '';
+      };
+    };
+
+    system.usb = {
+      mode = mkOption {
+        type    = types.enum [ "host" "device" "otg" ];
+        default = "otg";
+        description = ''
+          USB OTG port operating mode.
+            host    — USB-A: connect keyboards, hubs, drives, etc.
+            device  — USB peripheral: appear to a host computer as a serial
+                      port, ethernet adapter, or mass-storage device depending
+                      on which kernel gadget driver is loaded.
+            otg     — let the hardware ID pin decide automatically (default).
+                      No configuration script is generated.
+        '';
+      };
+
+      roleSwitchPath = mkOption {
+        type    = types.nullOr types.str;
+        default = null;
+        description = ''
+          Absolute path to the kernel USB role switch sysfs file, e.g.:
+            /sys/class/usb_role/fcd00000.usb-role-switch/role   (RV1103)
+            /sys/class/usb_role/4200000.usb-role-switch/role    (BL808)
+          When null (the default), the path is auto-detected at boot by
+          scanning /sys/class/usb_role/.  Set this explicitly if your board
+          has more than one USB controller and auto-detection picks the wrong one.
+        '';
+      };
+    };
+
+    system.mcu = {
+      enable = mkEnableOption ''
+        /bin/mcu helper script for controlling an attached MCU's reset and bootloader pins
+        via GPIO (using a MOSFET as an electronic switch).
+      '';
+
+      resetPin = mkOption {
+        type        = types.int;
+        default     = 47;
+        description = ''
+          Linux GPIO number for the RESET pin MOSFET gate.
+          Find it with:  gpioinfo  or  cat /sys/kernel/debug/gpio
+          The script drives this pin LOW for 100 ms to simulate a button press.
+        '';
+      };
+
+      bootloaderPin = mkOption {
+        type        = types.int;
+        default     = (-1);
+        description = ''
+          Linux GPIO number for a dedicated BOOT/BOOTSEL pin, or -1 to use the
+          double-tap-reset convention instead (RP2040 UF2 style).
+          When set, `mcu bootloader` holds this pin LOW while pulsing RESET once
+          (STM32 DFU / nRF52 OTA style).
         '';
       };
     };

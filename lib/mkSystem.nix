@@ -17,6 +17,8 @@ lib.evalModules {
     ../modules/core/rockchip.nix
     ../modules/core/firmware.nix
     ../modules/core/sdimage.nix
+    ../modules/core/mcu.nix
+    ../modules/core/usb.nix
     ../modules/services/default.nix
     ../modules/networking/dhcp.nix
   ];

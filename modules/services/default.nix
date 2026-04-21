@@ -19,5 +19,7 @@
     ./nrfnet.nix
     ./hello.nix
     ./zram.nix
+    ./mesh-bbs.nix
+    ./companion-satellite.nix
   ];
 }
