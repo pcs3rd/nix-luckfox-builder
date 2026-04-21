@@ -91,8 +91,26 @@ pkgs.stdenv.mkDerivation {
     mkdir -p $out/opt/meshing-around
     cp -r . $out/opt/meshing-around/
 
-    # ── Bundled Python packages ───────────────────────────────────────────
+    # ── Python standard library ───────────────────────────────────────────
+    # Python needs its stdlib (encodings, os, io, …) before it can do
+    # anything.  The compiled-in prefix points to /nix/store/…, which
+    # does not exist on the target.  Copy the stdlib and use PYTHONHOME
+    # to redirect.  Layout:  /opt/meshing-around/lib/python3.X/  ← stdlib
+    #                         /opt/meshing-around/lib/            ← site-pkgs
+    # With PYTHONHOME=/opt/meshing-around, Python finds lib/python3.X/.
     mkdir -p $out/opt/meshing-around/lib
+    for pyLibDir in ${python}/lib/python*/; do
+      pyVer=$(basename "$pyLibDir")
+      mkdir -p "$out/opt/meshing-around/lib/$pyVer"
+      cp -rLT "$pyLibDir" "$out/opt/meshing-around/lib/$pyVer"
+      # Patch RPATH of every .so in the stdlib so dlopen finds /lib deps.
+      find "$out/opt/meshing-around/lib/$pyVer" -name '*.so*' -type f | \
+        while read -r so; do
+          patchelf --set-rpath "/lib" "$so" 2>/dev/null || true
+        done
+    done
+
+    # ── Bundled site-packages ─────────────────────────────────────────────
     cp -rLT ${bundledLibs} $out/opt/meshing-around/lib/
 
     # ── Python interpreter + dynamic linker + shared libraries ───────────
@@ -158,7 +176,10 @@ pkgs.stdenv.mkDerivation {
     # ── Launcher ─────────────────────────────────────────────────────────
     cat > $out/bin/meshing-around << 'LAUNCHER'
 #!/bin/sh
-# meshing-around launcher — logs to /var/log/meshing-around.log
+# meshing-around launcher
+# PYTHONHOME tells CPython where to find its standard library (lib/python3.X/).
+# PYTHONPATH adds the bundled site-packages on top of that.
+export PYTHONHOME=/opt/meshing-around
 export PYTHONPATH=/opt/meshing-around/lib
 cd /opt/meshing-around
 exec /bin/python3 mesh_bot.py "$@"
