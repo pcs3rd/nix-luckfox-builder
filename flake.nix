@@ -164,7 +164,7 @@ exec qemu-system-arm \
   -append "console=ttyAMA0 root=/dev/vda rw init=/sbin/init panic=1" \
   -drive  "file=$DISK,format=qcow2,if=virtio" \
   -nographic \
-  -netdev "user,id=net0,hostfwd=tcp::${SSH_PORT}-:22" \
+  -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
   -device virtio-net-device,netdev=net0 \
   -device virtio-rng-device
 RUNEOF
