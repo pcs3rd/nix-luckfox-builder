@@ -266,47 +266,84 @@ PYWRAP
       patchelf --set-rpath "/lib" $out/bin/python3.bin
     fi
 
-    # Copy every direct shared-library dependency of the Python binary.
-    # We search across the packages that Python links against at build time.
+    # ── Shared library bundling ──────────────────────────────────────────────
+    #
+    # copy_needed ELF
+    #
+    # For each DT_NEEDED entry in ELF:
+    #   1. Read the ELF's own RPATH — these are the exact Nix store dirs the
+    #      build system placed every dep in. No guessing required.
+    #   2. Follow symlinks (libz.so.1 → libz.so.1.2.13) to get the real file.
+    #   3. Fall back to a broad search across known packages if RPATH search
+    #      fails (e.g. for gcc runtime libs that have no RPATH entry).
+    #   4. Install into $out/lib/ and recurse on the ORIGINAL store path so
+    #      we never read back the already-patched copy (which has RPATH=/lib).
+    #
+    # ALWAYS call this on the ORIGINAL nix store path, not on files already
+    # copied to $out/lib/ (those have had RPATH replaced with /lib).
     copy_needed() {
       local elf="$1"
+      local rpath
+      rpath=$(patchelf --print-rpath "$elf" 2>/dev/null || true)
+
       patchelf --print-needed "$elf" 2>/dev/null | while read -r libname; do
         [ -f "$out/lib/$libname" ] && continue
-        # -L: follow symlinks — in the Nix store versioned .so files like
-        # libz.so.1.x.x are real files while libz.so.1 is a symlink.
-        # Without -L, -type f won't match the symlink and the library is missed.
-        found=$(find -L \
-          ${python} \
-          ${pkgs.zlib} \
-          ${pkgs.libffi} \
-          ${pkgs.openssl.out} \
-          ${pkgs.sqlite} \
-          ${pkgs.bzip2} \
-          ${pkgs.xz} \
-          ${pkgs.ncurses} \
-          ${pkgs.expat} \
-          ${pkgs.readline} \
-          ${pkgs.stdenv.cc.cc.lib} \
-          -name "$libname" -type f 2>/dev/null | head -1)
-        if [ -n "$found" ]; then
+
+        found=""
+
+        # Primary: walk the RPATH dirs that the Nix build recorded
+        for rdir in $(echo "$rpath" | tr ':' '\n'); do
+          [ -z "$rdir" ] && continue
+          candidate="$rdir/$libname"
+          if [ -e "$candidate" ]; then
+            found=$(readlink -f "$candidate" 2>/dev/null || echo "$candidate")
+            break
+          fi
+        done
+
+        # Fallback: broad search (catches gcc runtime, musl, etc.)
+        if [ -z "$found" ]; then
+          found=$(find -L \
+            ${python} \
+            ${pkgs.zlib} \
+            ${pkgs.libffi} \
+            ${pkgs.openssl.out} \
+            ${pkgs.sqlite} \
+            ${pkgs.bzip2} \
+            ${pkgs.xz} \
+            ${pkgs.ncurses} \
+            ${pkgs.expat} \
+            ${pkgs.readline} \
+            ${pkgs.stdenv.cc.cc.lib} \
+            -name "$libname" -type f 2>/dev/null | head -1)
+        fi
+
+        if [ -n "$found" ] && [ -f "$found" ]; then
           install -Dm755 "$found" "$out/lib/$libname"
           patchelf --set-rpath "/lib" "$out/lib/$libname" 2>/dev/null || true
-          copy_needed "$out/lib/$libname"
+          # Recurse on the ORIGINAL store path so its RPATH is still intact
+          copy_needed "$found"
+        else
+          echo "WARNING: could not find $libname (needed by $elf)" >&2
         fi
       done
     }
+
     echo "=== bundling shared libs for Python binary ==="
     copy_needed "$realPython"
 
-    # C extension modules (.so files under lib-dynload/ and site-packages) have
-    # their own shared library deps that the Python binary itself doesn't pull in
-    # directly (e.g. _ctypes.so → libffi, _ssl.so → libssl/libcrypto).
-    # Walk every .so in the bundled tree and collect their deps too.
+    # Walk the ORIGINAL Nix store extension modules (RPATH still points to
+    # store deps — not the copies in $out which already have RPATH=/lib).
     echo "=== bundling shared libs for C extension modules ==="
-    find "$out/opt/meshing-around/lib" -name '*.so*' -type f | \
-      while read -r so; do
+    for pyLibDir in ${python}/lib/python*/; do
+      find -L "$pyLibDir" -name '*.so*' -type f | while read -r so; do
         copy_needed "$so"
       done
+    done
+    # Site-packages bundled from nixpkgs — same treatment
+    find -L ${bundledLibs} -name '*.so*' -type f 2>/dev/null | while read -r so; do
+      copy_needed "$so"
+    done
 
     echo "=== lib contents ==="
     ls $out/lib/ || true
