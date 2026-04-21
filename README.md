@@ -278,11 +278,7 @@ services.companion-satellite = {
 
 **Note:** The derivation builds from source using a cross-compiled musl
 Node.js (official pre-built releases are glibc-linked and won't run on this
-rootfs). Fill in `SAT_SHA256` in `pkgs/companion-satellite.nix` first:
-
-```sh
-nix-prefetch-github bitfocus companion-satellite --rev v3.2.0
-```
+rootfs). 
 
 ### zram swap
 
@@ -300,6 +296,51 @@ system.zram = {
 users.root.hashedPassword = "!";  # locked (default)
 # Generate: openssl passwd -6 yourpassword
 ```
+
+---
+
+## Available packages
+
+All packages live in `pkgs/` and are registered in `pkgs/default.nix`.
+Reference them in `configuration.nix` via `localPkgs.<name>`.
+
+### Userspace tools
+
+| Name | Version | Source | Notes |
+|---|---|---|---|
+| `sysinfo` | 1.0 | local | Lightweight static C utility — CPU, RAM, uptime |
+| `htop` | 3.5.0 | nixpkgs static | Interactive process viewer |
+| `nano` | nixpkgs | nixpkgs static | Terminal text editor (includes terminfo for vt100/linux) |
+| `meshtastic-cli` | nixpkgs | nixpkgs `python3.pkgs.meshtastic` | Minimal Meshtastic CLI — `meshtastic --info`, `--sendtext`, etc. |
+
+### Meshtastic / mesh services
+
+| Name | Version | Source | Notes |
+|---|---|---|---|
+| `mesh-bbs` | 0.1.0 | local | Minimal BBS + store-and-forward bot; only `meshtastic` + `pypubsub` deps |
+| `meshing-around` | unstable-`9fe580a3` | [SpudGunMan/meshing-around](https://github.com/SpudGunMan/meshing-around) @ `9fe580a3` | Full-featured bot: weather, APRS, games, satellite passes |
+| `meshtasticd` | 2.5-luckfox | [meshtastic/firmware](https://github.com/meshtastic/firmware) @ `d50caf23` | Linux-native Meshtastic daemon (turns SBC into a mesh node) |
+| `companion-satellite` | `97e9a870` | [bitfocus/companion-satellite](https://github.com/bitfocus/companion-satellite) @ `97e9a870` | Peripheral client — connects USB HID devices to Companion server |
+
+### Radio / hardware
+
+| Name | Version | Source | Notes |
+|---|---|---|---|
+| `nrfnet` | unstable-`934b34ef` | [aarossig/nrfnet](https://github.com/aarossig/nrfnet) @ `934b34ef` | TUN/TAP tunnel over nRF24L01+ SPI radio |
+| `rf24` | `436c9eae` | [nRF24/RF24](https://github.com/nRF24/RF24) @ `436c9eae` | RF24 C++ library (nrfnet build dependency, not installed directly) |
+
+### Board support
+
+| Name | Version | Source | Notes |
+|---|---|---|---|
+| `uboot` | 2024.01-luckfox | [luckfox-eng29/luckfox-pico](https://github.com/luckfox-eng29/luckfox-pico) @ `438d5270` | U-Boot SPL + `u-boot.img` for RV1103 |
+| `luckfox-kernel-modules` | 5.10-luckfox | [luckfox-eng29/luckfox-pico](https://github.com/luckfox-eng29/luckfox-pico) @ `438d5270` | Vendor kernel modules (`lib/modules/`) for `=m` drivers |
+| `ox64-firmware` | v1.0.1 | [openbouffalo/buildroot_bouffalo](https://github.com/openbouffalo/buildroot_bouffalo) | Ox64 kernel Image + DTB + M0/D0 pre-loader blobs; fetched by hash |
+
+> **Updating a pinned package:** Change the `_REV` constant in the relevant
+> `pkgs/*.nix` file, then run `nix-prefetch-github <owner> <repo> --rev <newrev>`
+> (or `nix-prefetch-url --unpack <url>` for tarball sources) and paste the new
+> hash into the corresponding `_SHA256` constant.
 
 ---
 
