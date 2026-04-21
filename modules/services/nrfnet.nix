@@ -17,7 +17,7 @@ in
     packages = [ nrfnet ];
 
     services.user.nrfnet = {
-      enable = true;
+      enable = lib.mkDefault false;
       action = "respawn";
       script = ''
         exec /bin/nrfnet ${args} >> /var/log/nrfnet.log 2>&1
