@@ -87,6 +87,8 @@ pkgs.stdenv.mkDerivation {
   dontFixup  = true;   # skip strip/patchelf — Python scripts + a foreign ELF
 
   installPhase = ''
+    set -x   # trace every command so failures are visible in nix log
+
     # ── Application source ────────────────────────────────────────────────
     mkdir -p $out/opt/meshing-around
     cp -r . $out/opt/meshing-around/
@@ -99,15 +101,21 @@ pkgs.stdenv.mkDerivation {
     # nixpkgs wraps the real CPython ELF in a small makeBinaryWrapper shim
     # (~7 KB) that execs the real interpreter at an absolute /nix/store/…
     # path — which does not exist on the target.  Find the real ELF first.
+    # For cross-compiled packages the wrapper may not exist; fall back to
+    # the versioned binary (e.g. python3.12) which IS the real ELF.
     mkdir -p $out/bin $out/lib
 
-    realPython=$(ls ${python}/bin/.python*-wrapped 2>/dev/null | head -1)
-    [ -z "$realPython" ] && realPython=$(readlink -f ${python}/bin/python3)
+    realPython=$(find ${python}/bin -name '.python*-wrapped' | head -1)
+    if [ -z "$realPython" ]; then
+      realPython=$(readlink -f ${python}/bin/python3)
+    fi
+    echo "=== using Python ELF: $realPython ==="
     install -Dm755 "$realPython" $out/bin/python3
 
     # Copy the ELF interpreter (musl dynamic linker, e.g. ld-musl-armhf.so.1).
     # patchelf tells us exactly which one this binary was linked against.
     interp=$(patchelf --print-interpreter "$realPython" 2>/dev/null || true)
+    echo "=== ELF interpreter: $interp ==="
     if [ -n "$interp" ] && [ -f "$interp" ]; then
       install -Dm755 "$interp" "$out/lib/$(basename "$interp")"
     fi
@@ -136,7 +144,10 @@ pkgs.stdenv.mkDerivation {
         fi
       done
     }
+    echo "=== bundling shared libs ==="
     copy_needed "$realPython"
+    echo "=== lib contents ==="
+    ls $out/lib/ || true
 
     # ── Launcher ─────────────────────────────────────────────────────────
     cat > $out/bin/meshing-around << 'LAUNCHER'
