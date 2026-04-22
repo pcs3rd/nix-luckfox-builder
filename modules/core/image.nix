@@ -30,7 +30,7 @@ let
 in
 
 {
-  config.system.build.image = pkgs.runCommand "sd.img" {
+  config.system.build.image = pkgs.runCommand "sd-image" {
     # nativeBuildInputs = tools that run on the BUILD machine.
     # In a cross-compilation package set (e.g. riscv64-musl), buildInputs
     # would give us riscv64 binaries that can't execute on the build host.
@@ -39,7 +39,6 @@ in
       python3     # MBR partition-table writer
     ];
   } ''
-    IMG=$out
     IMAGE_MB=${toString config.system.imageSize}
     IMAGE_BYTES=$(( IMAGE_MB * 1024 * 1024 ))
     PART_START_SECTOR=2048          # 1 MiB gap (standard for SD cards)
@@ -48,6 +47,8 @@ in
     PART_SIZE_SECTORS=$(( PART_SIZE_BYTES / 512 ))
 
     # ── Blank image ───────────────────────────────────────────────────────────
+    mkdir -p $out
+    IMG=$out/image.img
     dd if=/dev/zero of=$IMG bs=1M count=$IMAGE_MB 2>/dev/null
 
     # ── MBR partition table ───────────────────────────────────────────────────
