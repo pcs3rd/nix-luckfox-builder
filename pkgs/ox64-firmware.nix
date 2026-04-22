@@ -165,6 +165,18 @@ pkgs.runCommand "ox64-firmware-${BUILDROOT_REV}" {
     find src -maxdepth 4 >&2; exit 1
   fi
 
+  # ── SPI flash image ───────────────────────────────────────────────────────
+  # bl808-firmware.bin is a combined image for the BL808 internal SPI flash.
+  # Flash it once with bflb-iot-tool to enable SD card boot:
+  #   bflb-iot-tool --chipname bl808 --port /dev/ttyUSB0 \
+  #     --baudrate 2000000 --firmware result/bl808-firmware.bin
+  if [ -f "$FIRMWARE/bl808-firmware.bin" ]; then
+    cp "$FIRMWARE/bl808-firmware.bin" "$out/bl808-firmware.bin"
+  else
+    echo "WARNING: bl808-firmware.bin not found in release (may be named differently)" >&2
+    ls "$FIRMWARE" >&2
+  fi
+
   # ── Pre-loader blobs ───────────────────────────────────────────────────────
   # Handle both old naming (low_load_*) and new naming (d0_lowload_* / m0_lowload_*)
   if [ -f "$FIRMWARE/d0_lowload_bl808_d0.bin" ]; then
@@ -227,6 +239,8 @@ pkgs.runCommand "ox64-firmware-${BUILDROOT_REV}" {
   for f in Image bl808-pine64-ox64.dtb low_load_bl808_d0.bin low_load_bl808_m0.bin; do
     [ -f "$out/$f" ] || { echo "ERROR: $out/$f was not produced" >&2; exit 1; }
   done
+  [ -f "$out/bl808-firmware.bin" ] || \
+    echo "NOTE: bl808-firmware.bin absent — SPI flash step will need it from the release manually" >&2
 
   echo "ox64-firmware ${BUILDROOT_REV} unpacked:"
   ls -lh "$out/"
