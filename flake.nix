@@ -332,6 +332,9 @@ RUNEOF
         ox64-firmware     = import ./pkgs/ox64-firmware.nix { pkgs = hostPkgs; };
         ox64-rootfs       = ox64.config.system.build.rootfs;
         ox64-image        = ox64.config.system.build.image;
+        # Full 2-partition SD image (FAT32 boot + ext4 rootfs).
+        # Flash directly: dd if=result/ox64-sdcard.img of=/dev/sdX bs=4M status=progress
+        ox64-sd-image     = ox64.config.system.build.ox64SdImage;
       };
 
       apps = {

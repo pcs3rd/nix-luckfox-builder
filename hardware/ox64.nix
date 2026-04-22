@@ -35,25 +35,32 @@
 #   p2 — ext4 rootfs A  (active on first boot)
 #   p3 — ext4 rootfs B  (populated on first upgrade)
 #
-# NOTE: sdimage.nix handles the Luckfox (ext4-only) SD layout.  The Ox64
-# FAT32 boot partition is managed separately via the OpenBouffalo sdcard.img.
-# Use that image as a base and flash the Nix-built rootfs onto p2 (and p3
-# when using A/B):
-#   dd if=result/rootfs.img of=/dev/sdX2 bs=4M status=progress
+# ── Full SD image (recommended) ──────────────────────────────────────────────
 #
-# For A/B: also copy the slot-select initramfs into the FAT boot partition:
-#   nix build .#slotSelectInitramfs
-#   mount /dev/sdX1 /mnt
-#   cp result/initramfs-slotselect.cpio.gz /mnt/
-#   # add  INITRD /initramfs-slotselect.cpio.gz  to extlinux/extlinux.conf
-#   umount /mnt
+# ox64-sdimage.nix builds a 2-partition image that includes both the FAT32
+# boot partition (pre-loaders + kernel + DTB + extlinux.conf) and the ext4
+# rootfs — no OpenBouffalo sdcard.img needed as a base:
+#
+#   nix build .#packages.<system>.ox64-sd-image
+#   dd if=result/ox64-sdcard.img of=/dev/sdX bs=4M status=progress
+#
+# ── Rootfs-only update (subsequent upgrades) ──────────────────────────────────
+#
+# For fast rootfs-only updates over SSH (the FAT boot partition is never
+# touched after initial flash):
+#
+#   dd if=result/image.img of=/dev/sdX2 bs=4M status=progress
+#
+# With A/B enabled, use /bin/upgrade on the device instead:
+#   nix build .#ox64-rootfs-partition
+#   ssh root@ox64 upgrade < result/rootfs.ext4
 #
 # ── U-Boot ──────────────────────────────────────────────────────────────────
 # U-Boot for Ox64 lives in https://github.com/openbouffalo/u-boot.
 # It reads extlinux/extlinux.conf from the FAT32 boot partition.
 # Pre-built U-Boot is included in the OpenBouffalo sdcard.img release.
 
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 
 let
   firmware = import ../pkgs/ox64-firmware.nix { inherit pkgs; };
@@ -65,8 +72,12 @@ in
 
     # Fetched automatically from the OpenBouffalo release once you fill in
     # BUILDROOT_SHA256 in pkgs/ox64-firmware.nix.
-    kernel = "${firmware}/Image";
-    dtb    = "${firmware}/bl808-pine64-ox64.dtb";
+    kernel      = "${firmware}/Image";
+    dtb         = "${firmware}/bl808-pine64-ox64.dtb";
+
+    # Expose the full firmware derivation so ox64-sdimage.nix can include the
+    # D0/M0 pre-loaders in the FAT32 boot partition.
+    ox64Firmware = firmware;
   };
 
   # Ox64 serial console is UART0 at 2 Mbaud
@@ -91,9 +102,10 @@ in
     slotB      = "/dev/mmcblk0p3";
   };
 
-  # Rockchip-specific modules don't apply to BL808
-  rockchip.enable   = false;
-  boot.uboot.enable = false;
+  # Rockchip-specific modules don't apply to BL808.
+  # mkForce so these win over any conflicting values in configuration.nix.
+  rockchip.enable   = lib.mkForce false;
+  boot.uboot.enable = lib.mkForce false;
 
   # ── USB OTG port (BL808 USB controller) ──────────────────────────────────
   # The Ox64 has a single USB 2.0 OTG port.  Default is "otg" (ID-pin).

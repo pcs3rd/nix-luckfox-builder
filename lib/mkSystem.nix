@@ -21,6 +21,7 @@ lib.evalModules {
     ../modules/core/usb.nix
     ../modules/core/usb-gadget.nix
     ../modules/core/ab-rootfs.nix
+    ../modules/core/ox64-sdimage.nix
     ../modules/services/default.nix
     ../modules/networking/dhcp.nix
   ];

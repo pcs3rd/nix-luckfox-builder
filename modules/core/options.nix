@@ -359,6 +359,16 @@ with lib;
         default     = null;
         description = "Path to the device tree blob. Required for SD image builds.";
       };
+      ox64Firmware = mkOption {
+        type        = types.nullOr types.path;
+        default     = null;
+        description = ''
+          Path to the ox64-firmware derivation output directory.
+          When set, ox64-sdimage.nix builds a full 2-partition SD image that
+          includes the D0/M0 pre-loaders and U-Boot in a FAT32 boot partition.
+          Set automatically by hardware/ox64.nix.
+        '';
+      };
       kernelModulesPath = mkOption {
         type        = types.nullOr types.path;
         default     = null;
@@ -553,6 +563,16 @@ with lib;
       initramfs          = mkOption { type = types.path; readOnly = true; };
       image              = mkOption { type = types.path; readOnly = true; };
       sdImage            = mkOption { type = types.path; readOnly = true; };
+      ox64SdImage        = mkOption {
+        type        = types.nullOr types.path;
+        default     = null;
+        readOnly    = true;
+        description = ''
+          Full 2-partition Ox64 SD card image (FAT32 boot + ext4 rootfs).
+          Only produced by ox64-sdimage.nix when device.ox64Firmware is set.
+          Flash with: dd if=result/ox64-sdcard.img of=/dev/sdX bs=4M status=progress
+        '';
+      };
       uboot              = mkOption { type = types.path; readOnly = true; };
       rockchip           = mkOption { type = types.path; readOnly = true; };
       firmware           = mkOption { type = types.path; readOnly = true; };
