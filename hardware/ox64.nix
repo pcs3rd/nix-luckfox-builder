@@ -8,18 +8,24 @@
 # Only D0 runs Linux. M0/LP are handled by firmware blobs loaded by U-Boot.
 # RAM: 64 MB PSRAM (shared; Linux sees ~58 MB after firmware reservations).
 #
-# ── Fetching the kernel blob ─────────────────────────────────────────────────
+# ── Kernel ────────────────────────────────────────────────────────────────────
 #
-# The kernel Image and DTB are fetched from the OpenBouffalo buildroot release
-# by pkgs/ox64-firmware.nix using fetchurl + a pinned SHA256 hash.
+# The kernel is built from source via pkgs/ox64-kernel.nix (OpenBouffalo Linux
+# fork, cross-compiled to riscv64) and injected into system configurations
+# automatically by flake.nix when the source hash is filled in.
 #
-# Before your first build:
-#   1. Open pkgs/ox64-firmware.nix.
-#   2. Run the nix-prefetch-url command shown there to get the hash.
-#   3. Paste it into BUILDROOT_SHA256.
+# To enable source builds:
+#   1. Edit pkgs/ox64-kernel.nix
+#   2. Fill in KERNEL_REV and KERNEL_HASH (instructions are in that file)
+#   3. nix build .#ox64-kernel           # verify it builds
+#   4. nix build .#ox64-rootfs           # rootfs with built kernel
 #
-# After that, `nix build .#packages.<system>.ox64-rootfs` will fetch,
-# verify, and unpack the blobs automatically — no manual downloads needed.
+# Pre-built kernel fallback (ox64-firmware.nix):
+# If you prefer to use the OpenBouffalo release binaries instead of building
+# from source, the ox64-firmware.nix fetcher is still available:
+#   nix build .#ox64-firmware
+# The firmware package also provides the M0 pre-loader blobs which are
+# always needed in the FAT boot partition regardless of how the kernel is built.
 #
 # ── SD card layout ───────────────────────────────────────────────────────────
 #
@@ -53,20 +59,30 @@
 # It reads extlinux/extlinux.conf from the FAT32 boot partition.
 # Pre-built U-Boot is included in the OpenBouffalo sdcard.img release.
 
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 
 let
+  # Pre-built kernel + M0 pre-loader blobs from the OpenBouffalo release.
+  # Used as the kernel/dtb source when pkgs/ox64-kernel.nix hashes aren't set,
+  # AND always needed for the M0 pre-loader blobs in the FAT boot partition.
   firmware = import ../pkgs/ox64-firmware.nix { inherit pkgs; };
+
+  # Source-built kernel from pkgs/ox64-kernel.nix (null if hash not filled in).
+  # flake.nix injects device.kernel/dtb/kernelModulesPath from this when non-null,
+  # so these device settings below act as the firmware-blob fallback.
+  firmwareKernel = "${firmware}/Image";
+  firmwareDtb    = "${firmware}/bl808-pine64-ox64.dtb";
 in
 
 {
   device = {
-    name   = "ox64";
+    name = "ox64";
 
-    # Fetched automatically from the OpenBouffalo release once you fill in
-    # BUILDROOT_SHA256 in pkgs/ox64-firmware.nix.
-    kernel = "${firmware}/Image";
-    dtb    = "${firmware}/bl808-pine64-ox64.dtb";
+    # Fallback: pre-built kernel from the OpenBouffalo firmware release.
+    # lib.mkDefault gives this lower priority so flake.nix can override with
+    # a source-built kernel (via ox64KernelModule) when hashes are filled in.
+    kernel = lib.mkDefault firmwareKernel;
+    dtb    = lib.mkDefault firmwareDtb;
   };
 
   # Ox64 serial console is UART0 at 2 Mbaud

@@ -1,20 +1,27 @@
 # Hardware profile for the Luckfox Pico Mini B.
 #
-# Place your Luckfox SDK build outputs here before building:
-#   hardware/kernel/zImage
-#   hardware/kernel/pico-mini-b.dtb
+# ── Kernel ────────────────────────────────────────────────────────────────────
 #
-# Until those files are present, kernel and dtb default to null and the SD
-# image step will be skipped (rootfs + uboot bundles still build fine).
+# The kernel is built from source via pkgs/luckfox-kernel.nix and injected
+# into system configurations automatically by flake.nix when the source hash
+# is filled in.  No manual kernel files are needed.
+#
+# To enable source builds:
+#   1. Edit pkgs/luckfox-kernel.nix
+#   2. Fill in SDK_REV and SDK_HASH (instructions are in that file)
+#   3. nix build .#luckfox-kernel        # verify it builds
+#   4. nix build .#sdImage-flashable     # full SD image with built kernel
+#
+# Until the hash is filled in, device.kernel defaults to null and the SD
+# image step is skipped (rootfs and U-Boot bundles still build fine).
 
 { ... }:
 
 {
   device = {
-    name   = "pico-mini-b";
-    # Uncomment once you have the SDK kernel outputs:
-    # kernel = ./kernel/zImage;
-    # dtb    = ./kernel/pico-mini-b.dtb;
+    name = "pico-mini-b";
+    # kernel and dtb are injected by flake.nix from pkgs/luckfox-kernel.nix
+    # when SDK_REV / SDK_HASH are filled in.  Until then they remain null.
   };
 
   # ── A/B rootfs slot configuration ────────────────────────────────────────

@@ -51,6 +51,23 @@
         crossSystem = { config = "armv7l-unknown-linux-musleabihf"; };
       };
 
+      # ── Kernel cross-compilation: riscv64-linux-gnu ───────────────────────────
+      #
+      # The kernel itself doesn't use libc, so any riscv64 Linux toolchain works.
+      # We use gnu (glibc-linked) here because it's more commonly cached in
+      # nixpkgs binary caches than the musl variant.  The resulting kernel Image
+      # runs on bare hardware regardless of which libc the compiler targets.
+      riscv64KernelPkgs = import nixpkgs {
+        inherit system;
+        crossSystem = { config = "riscv64-unknown-linux-gnu"; };
+      };
+
+      # ── Kernel builds ─────────────────────────────────────────────────────
+      # Returns null when the source hash isn't filled in (graceful degradation —
+      # the SD image step is skipped rather than erroring out).
+      luckfoxKernel = import ./pkgs/luckfox-kernel.nix { pkgs = linuxPkgs; };
+      ox64Kernel    = import ./pkgs/ox64-kernel.nix    { pkgs = riscv64KernelPkgs; };
+
       # ── Cross-compilation packages for Pine64 Ox64 (BL808 RV64 musl) ────────
       #
       # The BL808's Linux core is an RV64GCV (C906) @ 480 MHz.  We target
@@ -83,17 +100,45 @@
       mkSystem   = import ./lib/mkSystem.nix { inherit pkgs;    lib = pkgs.lib;    };
       mkSystemRv = import ./lib/mkSystem.nix { pkgs = pkgsRv64; lib = pkgsRv64.lib; };
 
+      # ── Kernel injection helpers ───────────────────────────────────────────
+      # When a kernel is built from source, inject device.kernel / device.dtb /
+      # device.kernelModulesPath into the configuration via an inline module.
+      # When the kernel hash isn't filled in (null), the inline module is empty
+      # and the SD image step is skipped as before.
+      luckfoxKernelModule = lib.optionalAttrs (luckfoxKernel != null) {
+        device.kernel            = "${luckfoxKernel}/zImage";
+        device.dtb               = "${luckfoxKernel}/rv1103-luckfox-pico-mini-b.dtb";
+        device.kernelModulesPath = "${luckfoxKernel}/lib/modules";
+      };
+      ox64KernelModule = lib.optionalAttrs (ox64Kernel != null) {
+        device.kernel            = "${ox64Kernel}/Image";
+        device.dtb               = "${ox64Kernel}/bl808-pine64-ox64.dtb";
+        device.kernelModulesPath = "${ox64Kernel}/lib/modules";
+      };
+
       # ── System evaluations ──────────────────────────────────────────────────
       picoMiniB         = mkSystem   { configuration = ./configuration.nix;             };
       picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix;  };
       picoMiniB-vm      = mkSystem   { configuration = ./configurations/qemu-vm.nix;    };
-      picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;    };
-      picoMiniB-ab      = mkSystem   { configuration = ./configurations/sdimage-ab.nix; };
+      picoMiniB-sdimage = mkSystem   {
+        configuration = {
+          imports = [ ./configurations/sdimage.nix luckfoxKernelModule ];
+        };
+      };
+      picoMiniB-ab      = mkSystem   {
+        configuration = {
+          imports = [ ./configurations/sdimage-ab.nix luckfoxKernelModule ];
+        };
+      };
 
       # Pine64 Ox64 — RISC-V 64-bit (BL808 C906 core)
       # Build: nix build .#packages.<system>.ox64
-      # See hardware/ox64.nix for kernel/dtb setup instructions.
-      ox64 = mkSystemRv { configuration = ./configurations/ox64.nix; };
+      # See hardware/ox64.nix and pkgs/ox64-kernel.nix for setup instructions.
+      ox64 = mkSystemRv {
+        configuration = {
+          imports = [ ./configurations/ox64.nix ox64KernelModule ];
+        };
+      };
 
       # ── QEMU runner (initramfs) ──────────────────────────────────────────────
       qemu-test = hostPkgs.writeShellApplication {
@@ -327,11 +372,16 @@ RUNEOF
         qemu-vm-bundle    = qemu-vm-bundle;  # QCOW2 + kernel + run.sh
         qemu-vm           = qemu-vm;         # ephemeral-overlay launcher
 
+        # Luckfox kernel (from source) — fill in hashes in pkgs/luckfox-kernel.nix
+        luckfox-kernel    = luckfoxKernel;
+
         # Pine64 Ox64 (BL808 RV64 musl) — see configurations/ox64.nix
         # Fill in BUILDROOT_SHA256 in pkgs/ox64-firmware.nix before building.
         ox64-firmware     = import ./pkgs/ox64-firmware.nix { pkgs = hostPkgs; };
         ox64-rootfs       = ox64.config.system.build.rootfs;
         ox64-image        = ox64.config.system.build.image;
+        # Ox64 kernel (from source) — fill in hashes in pkgs/ox64-kernel.nix
+        ox64-kernel       = ox64Kernel;
       };
 
       apps = {
