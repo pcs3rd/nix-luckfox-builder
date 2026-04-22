@@ -577,7 +577,6 @@ with lib;
       firmware           = mkOption { type = types.path; readOnly = true; };
       slotSelectInitramfs = mkOption {
         type        = types.nullOr types.path;
-        default     = null;
         readOnly    = true;
         description = ''
           The slot-select initramfs cpio.gz produced by ab-rootfs.nix.
@@ -587,7 +586,6 @@ with lib;
       };
       rootfsPartition = mkOption {
         type        = types.nullOr types.path;
-        default     = null;
         readOnly    = true;
         description = ''
           A standalone raw ext4 image of the rootfs, suitable for streaming

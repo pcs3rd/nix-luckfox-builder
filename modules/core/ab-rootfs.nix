@@ -222,15 +222,13 @@ let
 in
 
 {
-  config = lib.mkIf cfg.enable {
-
-    # Expose the initramfs so sdimage.nix can embed it in the boot partition.
-    system.build.slotSelectInitramfs = slotSelectInitramfs;
-
-    # Expose the standalone rootfs image for SSH-based upgrades.
-    system.build.rootfsPartition = rootfsPartitionImage;
-
-    # Install upgrade and slot scripts into the rootfs.
+  config = {
+    # Always set these — readOnly options with no default must have exactly
+    # one definition. null when A/B is disabled, derivation when enabled.
+    system.build.slotSelectInitramfs = if cfg.enable then slotSelectInitramfs else null;
+    system.build.rootfsPartition     = if cfg.enable then rootfsPartitionImage else null;
+  } // lib.mkIf cfg.enable {
+    # Install upgrade and slot scripts into the rootfs only when A/B is on.
     packages = [
       (pkgs.runCommand "ab-rootfs-scripts" {} ''
         mkdir -p $out/bin
