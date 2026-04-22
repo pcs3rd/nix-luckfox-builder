@@ -17,7 +17,8 @@ in
 
 {
   imports = [
-    ./hardware/pico-mini-b.nix
+    #./hardware/pico-mini-b.nix
+    ./hardware/ox64.nix
   ];
 
   # ── Extra packages ──────────────────────────────────────────────────────────
