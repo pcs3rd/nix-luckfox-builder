@@ -90,7 +90,7 @@ in
   # Root on mmcblk0p2; p1 is the FAT32 boot partition.
   # With A/B enabled, the actual root is chosen at runtime by the
   # slot-select initramfs — this cmdline is the fallback / informational value.
-  boot.cmdline = lib.mkDefault "console=ttyS0,2000000 root=/dev/mmcblk0p2 rw rootfstype=ext4 rootwait";
+  boot.cmdline = "console=ttyS0,2000000 root=/dev/mmcblk0p2 rw rootfstype=ext4 rootwait";
 
   # ── A/B rootfs slot configuration ────────────────────────────────────────
   # p1 is the FAT32 boot partition (never upgraded).
