@@ -204,11 +204,9 @@ EXTEOF
 in
 
 {
-  # Only produce a config definition when firmware is available.
-  # When fw = null the default = null from options.nix is used uncontested.
-  # Using lib.mkIf (not if/else) so that the false branch emits no definition
-  # at all — the same pattern as slotSelectInitramfs in ab-rootfs.nix.
-  config = lib.mkIf (fw != null) {
-    system.build.ox64SdImage = ox64SdImage;
-  };
+  # ox64-sdimage.nix is the sole setter of this option — no default in
+  # options.nix (readOnly options count the default as a definition too,
+  # so having both a default and a config assignment causes a conflict).
+  config.system.build.ox64SdImage =
+    if fw != null then ox64SdImage else null;
 }

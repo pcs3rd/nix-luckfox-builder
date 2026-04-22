@@ -565,7 +565,6 @@ with lib;
       sdImage            = mkOption { type = types.path; readOnly = true; };
       ox64SdImage        = mkOption {
         type        = types.nullOr types.path;
-        default     = null;
         readOnly    = true;
         description = ''
           Full 2-partition Ox64 SD card image (FAT32 boot + ext4 rootfs).
