@@ -222,20 +222,23 @@ let
 in
 
 {
-  config = {
-    # Always set these — readOnly options with no default must have exactly
-    # one definition. null when A/B is disabled, derivation when enabled.
-    system.build.slotSelectInitramfs = if cfg.enable then slotSelectInitramfs else null;
-    system.build.rootfsPartition     = if cfg.enable then rootfsPartitionImage else null;
-  } // lib.mkIf cfg.enable {
-    # Install upgrade and slot scripts into the rootfs only when A/B is on.
-    packages = [
-      (pkgs.runCommand "ab-rootfs-scripts" {} ''
-        mkdir -p $out/bin
-        cp ${upgradeScript} $out/bin/upgrade
-        cp ${slotScript}    $out/bin/slot
-        chmod +x $out/bin/upgrade $out/bin/slot
-      '')
-    ];
-  };
+  config = lib.mkMerge [
+    {
+      # Always set these — readOnly options with no default must have exactly
+      # one definition. null when A/B is disabled, derivation when enabled.
+      system.build.slotSelectInitramfs = if cfg.enable then slotSelectInitramfs else null;
+      system.build.rootfsPartition     = if cfg.enable then rootfsPartitionImage else null;
+    }
+    (lib.mkIf cfg.enable {
+      # Install upgrade and slot scripts into the rootfs only when A/B is on.
+      packages = [
+        (pkgs.runCommand "ab-rootfs-scripts" {} ''
+          mkdir -p $out/bin
+          cp ${upgradeScript} $out/bin/upgrade
+          cp ${slotScript}    $out/bin/slot
+          chmod +x $out/bin/upgrade $out/bin/slot
+        '')
+      ];
+    })
+  ];
 }
