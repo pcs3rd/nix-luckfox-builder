@@ -212,7 +212,12 @@ EXTEOF
     # ── Build ext4 partition 1 image from staging directory ─────────────────
     # mkfs.ext4 -d populates the filesystem in-place from a directory tree,
     # without needing to mount anything — safe on macOS and in the Nix sandbox.
-    dd if=/dev/zero of=part1.img bs=1 count=0 seek=$PART_SIZE_BYTES 2>/dev/null
+    #
+    # Use truncate to create a sparse file of exactly PART_SIZE_BYTES.
+    # "dd bs=1 count=0 seek=N" is NOT equivalent — on Linux, GNU dd with
+    # count=0 transfers nothing and does NOT extend the output file to the
+    # seek position, leaving a 0-byte file.  truncate is unambiguous.
+    truncate -s $PART_SIZE_BYTES part1.img
     mkfs.ext4 \
       -d staging \
       -L rootfs-a \
@@ -229,7 +234,7 @@ EXTEOF
     cp -r ${rootfs} staging-b
     chmod -R u+w staging-b
 
-    dd if=/dev/zero of=part2.img bs=1 count=0 seek=$PART_SIZE_BYTES 2>/dev/null
+    truncate -s $PART_SIZE_BYTES part2.img
     mkfs.ext4 \
       -d staging-b \
       -L rootfs-b \
