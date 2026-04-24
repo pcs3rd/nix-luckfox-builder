@@ -317,15 +317,18 @@ RUNEOF
         rootfsPartition       = picoMiniB-ab.config.system.build.rootfsPartition;
         slotSelectInitramfs   = picoMiniB-ab.config.system.build.slotSelectInitramfs;
 
-        # QEMU test outputs
+        # QEMU test outputs — Linux hosts only.
+        # Building the ARM kernel requires a Linux build environment; Darwin
+        # hosts need a configured nix-darwin Linux builder to use these.
+        # On Darwin without a builder, omit them rather than failing the whole
+        # flake evaluation.
+      } // lib.optionalAttrs (lib.hasSuffix "-linux" system) {
         qemu-initramfs    = picoMiniB-qemu.config.system.build.initramfs;
         qemu-test         = qemu-test;
         qemu-overlay      = qemu-overlay;
-
-        # Importable VM outputs
-        qemu-vm-disk      = qemu-vm-disk;    # standalone QCOW2
-        qemu-vm-bundle    = qemu-vm-bundle;  # QCOW2 + kernel + run.sh
-        qemu-vm           = qemu-vm;         # ephemeral-overlay launcher
+        qemu-vm-disk      = qemu-vm-disk;
+        qemu-vm-bundle    = qemu-vm-bundle;
+        qemu-vm           = qemu-vm;
 
         # Pine64 Ox64 (BL808 RV64 musl) — see configurations/ox64.nix
         # Fill in BUILDROOT_SHA256 in pkgs/ox64-firmware.nix before building.
@@ -337,7 +340,7 @@ RUNEOF
         ox64-sd-image     = ox64.config.system.build.ox64SdImage;
       };
 
-      apps = {
+      apps = lib.optionalAttrs (lib.hasSuffix "-linux" system) {
         qemu-test = {
           type    = "app";
           program = "${qemu-test}/bin/qemu-test-luckfox";
