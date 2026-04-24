@@ -262,16 +262,17 @@ pkgs.runCommand "ox64-firmware-${BUILDROOT_REV}" {
   # Flash with:
   #   flashrom -p ch341a_spi -c <chip> -w result/bl808-combined.bin
   if [ -f "$out/bl808-firmware.bin" ]; then
-    # Allocate 8 MB (0x800000) + size of bl808-firmware.bin
-    FW_SIZE=$(wc -c < "$out/bl808-firmware.bin")
-    COMBINED_SIZE=$(( 0x800000 + FW_SIZE ))
-    dd if=/dev/zero bs=1 count=0 seek=$COMBINED_SIZE of="$out/bl808-combined.bin" 2>/dev/null
+    # Allocate exactly 16 MiB — the full capacity of the Winbond W25Q128 (and
+    # compatible) SPI NOR flash on the Ox64.  flashrom requires the image to
+    # match the chip size exactly.
+    CHIP_SIZE=$(( 16 * 1024 * 1024 ))   # 16 MiB = 0x1000000
+    dd if=/dev/zero bs=1 count=0 seek=$CHIP_SIZE of="$out/bl808-combined.bin" 2>/dev/null
     dd conv=notrunc if="$out/low_load_bl808_m0.bin" of="$out/bl808-combined.bin" 2>/dev/null
     dd conv=notrunc if="$out/low_load_bl808_d0.bin" of="$out/bl808-combined.bin" \
       seek=$((0x100000)) bs=1 2>/dev/null
     dd conv=notrunc if="$out/bl808-firmware.bin" of="$out/bl808-combined.bin" \
       seek=$((0x800000)) bs=1 2>/dev/null
-    echo "ox64-firmware: combined SPI image: $(( COMBINED_SIZE / 1024 ))K → $out/bl808-combined.bin"
+    echo "ox64-firmware: combined SPI image: 16 MiB → $out/bl808-combined.bin"
   else
     echo "NOTE: bl808-firmware.bin absent — skipping bl808-combined.bin" >&2
   fi
