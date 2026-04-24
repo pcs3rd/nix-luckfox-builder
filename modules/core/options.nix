@@ -519,42 +519,32 @@ with lib;
         See modules/core/ab-rootfs.nix for the full design description.
       '';
 
-      slotDisk = mkOption {
-        type        = types.str;
-        default     = "/dev/mmcblk0";
-        description = "Raw block device that holds the slot indicator byte.";
-      };
-
       slotOffset = mkOption {
         type        = types.int;
         default     = 512;
         description = ''
-          Byte offset within slotDisk at which the single slot indicator byte
+          Byte offset on the disk at which the single slot indicator byte
           ('a' or 'b') is stored.  The default 512 is the first byte of sector 1 —
-          safely between the MBR (sector 0) and the first bootloader stage on
-          both the Luckfox (Rockchip SPL at sector 64) and Ox64 (FAT partition
-          starting at sector 2048).
+          safely between the MBR (sector 0) and the first bootloader stage
+          (Rockchip SPL at sector 64).  The disk is located at runtime by
+          finding whichever block device contains the slotLabelA partition.
         '';
       };
 
-      slotA = mkOption {
+      slotLabelA = mkOption {
         type        = types.str;
-        default     = "/dev/mmcblk0p1";
+        default     = "rootfs-a";
         description = ''
-          Block device for rootfs slot A.
-          Luckfox default: /dev/mmcblk0p1  (partition 1 also holds the kernel).
-          Ox64:            /dev/mmcblk0p2  (partition 1 is the FAT boot partition).
+          Filesystem label of the slot A ext4 partition.  Used at runtime to
+          locate the partition via blkid — device-name-agnostic (works for
+          /dev/mmcblk0p1, /dev/vda1, /dev/sda1, etc.).
         '';
       };
 
-      slotB = mkOption {
+      slotLabelB = mkOption {
         type        = types.str;
-        default     = "/dev/mmcblk0p2";
-        description = ''
-          Block device for rootfs slot B.
-          Luckfox default: /dev/mmcblk0p2.
-          Ox64:            /dev/mmcblk0p3.
-        '';
+        default     = "rootfs-b";
+        description = "Filesystem label of the slot B ext4 partition.";
       };
     };
 

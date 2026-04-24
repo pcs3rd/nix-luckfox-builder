@@ -21,35 +21,16 @@
 #   Sectors 2–63          : unused / reserved
 #   Sector   64           : Rockchip SPL / idbloader
 #   Sector 16384          : U-Boot proper
-#   Sector 4096  ( 2 MiB) : ext4  rootfs A  (partition 1, /dev/mmcblk0p1)
-#   Sector 4096 + A size  : ext4  rootfs B  (partition 2, /dev/mmcblk0p2)
+#   Sector 4096  ( 2 MiB) : ext4  rootfs A  (label: rootfs-a, /dev/mmcblk0p1)
+#   Sector 4096 + A size  : ext4  rootfs B  (label: rootfs-b, /dev/mmcblk0p2)
 #
 #   The kernel and initramfs live in partition 1.  U-Boot always boots from
-#   there; the initramfs picks p1 or p2 as the actual root.
+#   there; the initramfs picks the active slot by filesystem label.
 #
 #   Configuration:
 #     system.abRootfs = {
 #       enable  = true;
-#       slotA   = "/dev/mmcblk0p1";  # default
-#       slotB   = "/dev/mmcblk0p2";  # default
-#     };
-#
-# Pine64 Ox64 (BL808 RISC-V):
-#
-#   Sector    0 (  512 B) : MBR + partition table
-#   Sector    1 (  512 B) : slot indicator byte ('a' or 'b')  ← managed here
-#   Sector 2048 (~  1 MiB): FAT32 boot partition (partition 1, /dev/mmcblk0p1)
-#                           — contains kernel Image, DTB, pre-loader blobs,
-#                             extlinux.conf, and the slot-select initramfs.
-#                           — NEVER upgraded (set-and-forget)
-#   Following p1          : ext4  rootfs A  (partition 2, /dev/mmcblk0p2)
-#   Following p2          : ext4  rootfs B  (partition 3, /dev/mmcblk0p3)
-#
-#   Configuration (set in hardware/ox64.nix):
-#     system.abRootfs = {
-#       enable  = true;
-#       slotA   = "/dev/mmcblk0p2";
-#       slotB   = "/dev/mmcblk0p3";
+#       # slotLabelA / slotLabelB default to "rootfs-a" / "rootfs-b"
 #     };
 #
 # ── Upgrade workflow ──────────────────────────────────────────────────────────
@@ -69,12 +50,14 @@
 # ── Configuration ─────────────────────────────────────────────────────────────
 #
 #   system.abRootfs = {
-#     enable    = true;
-#     slotDisk  = "/dev/mmcblk0";   # disk holding the slot indicator byte
-#     slotOffset = 512;             # byte offset of the indicator (sector 1)
-#     slotA     = "/dev/mmcblk0p1"; # Luckfox default; Ox64 uses p2
-#     slotB     = "/dev/mmcblk0p2"; # Luckfox default; Ox64 uses p3
+#     enable     = true;
+#     slotOffset = 512;        # byte offset of the indicator (default: sector 1)
+#     slotLabelA = "rootfs-a"; # ext4 label of slot A partition (default)
+#     slotLabelB = "rootfs-b"; # ext4 label of slot B partition (default)
 #   };
+#
+#   The disk device is derived at runtime from whichever partition carries
+#   slotLabelA, so no hardcoded device paths are needed.
 #
 # The SD image builder (sdimage.nix) detects A/B and:
 #   • creates two equal-size rootfs partitions
@@ -94,34 +77,48 @@ let
     mount -t sysfs    sysfs    /sys
     mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 
-    # Wait for the slot disk to appear.  devtmpfs is populated as the kernel
-    # registers devices; on QEMU the virtio-blk driver can lag the initramfs
-    # by a few hundred milliseconds, especially on a warm reset.
+    # Re-scan /sys and create any device nodes that devtmpfs may have missed.
+    # This is especially important on QEMU warm resets where virtio-blk
+    # enumeration can race ahead of the devtmpfs mount.
+    mdev -s 2>/dev/null || true
+
+    # Wait for at least one block device to appear in /sys/block.
     i=0
-    while [ $i -lt 10 ] && [ ! -b "${cfg.slotDisk}" ]; do
+    while [ $i -lt 10 ] && [ -z "$(ls /sys/block/ 2>/dev/null)" ]; do
       sleep 1
       i=$(( i + 1 ))
     done
-    if [ ! -b "${cfg.slotDisk}" ]; then
-      echo "slot-select: WARNING — ${cfg.slotDisk} not found after 10 s, defaulting to slot A" >&2
+
+    # Locate partitions by filesystem label — device-name-agnostic.
+    # Works for /dev/vda1, /dev/mmcblk0p1, /dev/sda1, etc.
+    SLOT_A_DEV=$(blkid -t LABEL="${cfg.slotLabelA}" -o device 2>/dev/null | head -1)
+    SLOT_B_DEV=$(blkid -t LABEL="${cfg.slotLabelB}" -o device 2>/dev/null | head -1)
+
+    if [ -z "$SLOT_A_DEV" ]; then
+      echo "slot-select: FATAL — no partition with LABEL=${cfg.slotLabelA}" >&2
+      exec /bin/sh
     fi
+
+    # Derive the whole disk from the partition path:
+    #   /dev/vda1      → /dev/vda
+    #   /dev/mmcblk0p1 → /dev/mmcblk0
+    DISK=$(echo "$SLOT_A_DEV" | sed -E 's/p?[0-9]+$//')
 
     # Read single slot indicator byte from the reserved raw disk location.
-    SLOT=$(dd if="${cfg.slotDisk}" bs=1 skip=${toString cfg.slotOffset} count=1 2>/dev/null)
+    SLOT=$(dd if="$DISK" bs=1 skip=${toString cfg.slotOffset} count=1 2>/dev/null)
 
-    if [ "$SLOT" = "b" ]; then
-      ROOT="${cfg.slotB}"
+    if [ "$SLOT" = "b" ] && [ -n "$SLOT_B_DEV" ]; then
+      ROOT="$SLOT_B_DEV"
     else
-      ROOT="${cfg.slotA}"
+      ROOT="$SLOT_A_DEV"
       SLOT=a
     fi
-    echo "slot-select: slot=$SLOT  root=$ROOT"
+    echo "slot-select: slot=$SLOT  disk=$DISK  root=$ROOT"
 
-    mkdir -p /newroot
     if ! mount "$ROOT" /newroot; then
-      echo "slot-select: WARNING — $ROOT failed, falling back to ${cfg.slotA}"
-      mount "${cfg.slotA}" /newroot || {
-        echo "slot-select: FATAL — cannot mount any slot; dropping to shell"
+      echo "slot-select: WARNING — $ROOT failed, falling back to $SLOT_A_DEV" >&2
+      mount "$SLOT_A_DEV" /newroot || {
+        echo "slot-select: FATAL — cannot mount any slot; dropping to shell" >&2
         exec /bin/sh
       }
     fi
@@ -141,7 +138,7 @@ let
 
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox fs/bin/busybox
     chmod +x fs/bin/busybox
-    for cmd in sh mount umount dd switch_root sleep; do
+    for cmd in sh mount umount dd switch_root sleep mdev blkid sed mkdir; do
       ln -sf busybox fs/bin/$cmd
     done
 
@@ -166,9 +163,6 @@ let
     # With compression (saves transfer time):
     #   gzip -c result/rootfs.ext4 | ssh root@luckfox "gunzip | upgrade"
 
-    DISK="${cfg.slotDisk}"
-    SLOT_A="${cfg.slotA}"
-    SLOT_B="${cfg.slotB}"
     OFFSET="${toString cfg.slotOffset}"
 
     # Refuse to run if stdin is a terminal — a rootfs image must be piped in.
@@ -179,11 +173,28 @@ let
       exit 1
     fi
 
+    # Resolve slot partitions by filesystem label — works on any device name.
+    SLOT_A=$(blkid -t LABEL="${cfg.slotLabelA}" -o device 2>/dev/null | head -1)
+    SLOT_B=$(blkid -t LABEL="${cfg.slotLabelB}" -o device 2>/dev/null | head -1)
+
+    if [ -z "$SLOT_A" ]; then
+      echo "upgrade: error: no partition with LABEL=${cfg.slotLabelA}" >&2
+      exit 1
+    fi
+
+    # Derive the whole-disk device from the slot A partition path.
+    DISK=$(echo "$SLOT_A" | sed -E 's/p?[0-9]+$//')
+
     CURRENT=$(dd if="$DISK" bs=1 skip="$OFFSET" count=1 2>/dev/null)
     case "$CURRENT" in
       b) NEXT=a; TARGET=$SLOT_A ;;
       *) NEXT=b; TARGET=$SLOT_B ;;
     esac
+
+    if [ -z "$TARGET" ]; then
+      echo "upgrade: error: no partition with LABEL=${cfg.slotLabelB} for target slot" >&2
+      exit 1
+    fi
 
     echo "upgrade: current=$CURRENT  next=$NEXT  target=$TARGET"
     echo "upgrade: streaming rootfs from stdin — do not interrupt..."
@@ -206,8 +217,19 @@ let
     # slot          — show active and standby slots
     # slot a        — set slot A active on next boot (no reboot)
     # slot b        — set slot B active on next boot (no reboot)
-    DISK="${cfg.slotDisk}"
     OFFSET="${toString cfg.slotOffset}"
+
+    # Resolve slot partitions by filesystem label — works on any device name.
+    SLOT_A=$(blkid -t LABEL="${cfg.slotLabelA}" -o device 2>/dev/null | head -1)
+    SLOT_B=$(blkid -t LABEL="${cfg.slotLabelB}" -o device 2>/dev/null | head -1)
+
+    if [ -z "$SLOT_A" ]; then
+      echo "slot: error: no partition with LABEL=${cfg.slotLabelA}" >&2
+      exit 1
+    fi
+
+    # Derive the whole-disk device from the slot A partition path.
+    DISK=$(echo "$SLOT_A" | sed -E 's/p?[0-9]+$//')
 
     case "$1" in
       a|b)
@@ -225,12 +247,12 @@ let
         CURRENT=$(dd if="$DISK" bs=1 skip="$OFFSET" count=1 2>/dev/null)
         case "$CURRENT" in
           b)
-            echo "active:  B  ${cfg.slotB}"
-            echo "standby: A  ${cfg.slotA}"
+            echo "active:  B  ($SLOT_B)"
+            echo "standby: A  ($SLOT_A)"
             ;;
           *)
-            echo "active:  A  ${cfg.slotA}"
-            echo "standby: B  ${cfg.slotB}"
+            echo "active:  A  ($SLOT_A)"
+            echo "standby: B  ($SLOT_B)"
             ;;
         esac
         ;;

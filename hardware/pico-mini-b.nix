@@ -22,12 +22,10 @@
   # Partition 2 holds rootfs B (no kernel — bootloader always reads from p1).
   # Enable in your configuration.nix with:  system.abRootfs.enable = true;
   # The SD image builder creates a two-partition image automatically.
-  system.abRootfs = {
-    slotDisk   = "/dev/mmcblk0";
-    slotOffset = 512;               # byte 512 = sector 1, between MBR and SPL
-    slotA      = "/dev/mmcblk0p1";
-    slotB      = "/dev/mmcblk0p2";
-  };
+  # A/B slot partitions are found at runtime by filesystem label ("rootfs-a",
+  # "rootfs-b") — no device path needed here.  Enable with:
+  #   system.abRootfs.enable = true;
+  system.abRootfs.slotOffset = 512;   # byte 512 = sector 1, between MBR and SPL
 
   # ── USB OTG port (RV1103 DWC2 controller at 0xfcd00000) ─────────────────
   # The RV1103 has a single USB 2.0 OTG port exposed via the Micro-USB

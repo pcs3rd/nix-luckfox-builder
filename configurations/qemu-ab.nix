@@ -54,15 +54,9 @@
   # No kernel modules tree in the initramfs, so zram modprobe would fail.
   system.zram.enable = lib.mkForce false;
 
-  # ── A/B configuration targeting the virtio-blk device ──────────────────────
-  # lib.mkForce overrides the /dev/mmcblk0* defaults set by pico-mini-b.nix.
-  system.abRootfs = {
-    enable     = true;
-    slotDisk   = lib.mkForce "/dev/vda";    # whole virtio-blk disk
-    slotOffset = lib.mkForce 512;           # byte offset of the indicator byte
-    slotA      = lib.mkForce "/dev/vda1";   # partition 1 — slot A
-    slotB      = lib.mkForce "/dev/vda2";   # partition 2 — slot B
-  };
+  # A/B — partitions are found at runtime by filesystem label so no device
+  # paths are needed here.  Works for both /dev/vda* and /dev/mmcblk0p*.
+  system.abRootfs.enable = true;
 
   # 512 MiB total → ~256 MiB per slot (sector 4096 onward, split in half).
   system.imageSize = lib.mkDefault 512;
