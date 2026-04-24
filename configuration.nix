@@ -75,7 +75,7 @@ in
   # Upgrade: nix build .#rootfsPartition
   #          ssh root@luckfox upgrade < result/rootfs.ext4
   #
-  system.abRootfs.enable = false;
+  system.abRootfs.enable = true;
 
   # ── Bootloader ──────────────────────────────────────────────────────────────
   boot.uboot = {
