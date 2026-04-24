@@ -191,19 +191,40 @@ let
   # ── /bin/slot ─────────────────────────────────────────────────────────────
   slotScript = pkgs.writeScript "slot" ''
     #!/bin/sh
-    # Show the active and standby slots.
+    # slot          — show active and standby slots
+    # slot a        — set slot A active on next boot (no reboot)
+    # slot b        — set slot B active on next boot (no reboot)
     DISK="${cfg.slotDisk}"
     OFFSET="${toString cfg.slotOffset}"
 
-    CURRENT=$(dd if="$DISK" bs=1 skip="$OFFSET" count=1 2>/dev/null)
-    case "$CURRENT" in
-      b)
-        echo "active:  B  ${cfg.slotB}"
-        echo "standby: A  ${cfg.slotA}"
+    case "$1" in
+      a|b)
+        TARGET="$1"
+        CURRENT=$(dd if="$DISK" bs=1 skip="$OFFSET" count=1 2>/dev/null)
+        if [ "$CURRENT" = "$TARGET" ]; then
+          echo "slot: already on slot $(echo "$TARGET" | tr a-z A-Z) — nothing to do"
+          exit 0
+        fi
+        printf '%s' "$TARGET" | dd of="$DISK" bs=1 seek="$OFFSET" conv=notrunc 2>/dev/null
+        sync
+        echo "slot: next boot will use slot $(echo "$TARGET" | tr a-z A-Z) — reboot to apply"
+        ;;
+      "")
+        CURRENT=$(dd if="$DISK" bs=1 skip="$OFFSET" count=1 2>/dev/null)
+        case "$CURRENT" in
+          b)
+            echo "active:  B  ${cfg.slotB}"
+            echo "standby: A  ${cfg.slotA}"
+            ;;
+          *)
+            echo "active:  A  ${cfg.slotA}"
+            echo "standby: B  ${cfg.slotB}"
+            ;;
+        esac
         ;;
       *)
-        echo "active:  A  ${cfg.slotA}"
-        echo "standby: B  ${cfg.slotB}"
+        echo "usage: slot [a|b]" >&2
+        exit 1
         ;;
     esac
   '';
