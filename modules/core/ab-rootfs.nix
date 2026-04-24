@@ -115,8 +115,8 @@ let
     # mmcblk* and nvme* use a 'p' prefix before the partition number;
     # everything else (vda, sda, …) uses bare digits.
     case "$DISK" in
-      *mmcblk* | *nvme*) SLOT_A="${DISK}p1"; SLOT_B="${DISK}p2" ;;
-      *)                 SLOT_A="${DISK}1";  SLOT_B="${DISK}2"  ;;
+      *mmcblk* | *nvme*) SLOT_A="''${DISK}p1"; SLOT_B="''${DISK}p2" ;;
+      *)                 SLOT_A="''${DISK}1";  SLOT_B="''${DISK}2"  ;;
     esac
 
     # Read single slot indicator byte from the reserved raw disk location.
