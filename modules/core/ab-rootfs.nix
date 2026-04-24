@@ -159,6 +159,14 @@ let
     SLOT_B="${cfg.slotB}"
     OFFSET="${toString cfg.slotOffset}"
 
+    # Refuse to run if stdin is a terminal — a rootfs image must be piped in.
+    if [ -t 0 ]; then
+      echo "upgrade: error: no input detected — pipe a rootfs image into this command" >&2
+      echo "  nix build .#rootfsPartition" >&2
+      echo "  ssh root@luckfox upgrade < result/rootfs.ext4" >&2
+      exit 1
+    fi
+
     CURRENT=$(dd if="$DISK" bs=1 skip="$OFFSET" count=1 2>/dev/null)
     case "$CURRENT" in
       b) NEXT=a; TARGET=$SLOT_A ;;
