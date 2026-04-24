@@ -60,24 +60,48 @@
       # (not built-in) in the standard ARM kernel, so we find and decompress
       # the relevant .ko files and embed them in the slot-select initramfs.
       virtioModules = hostPkgs.runCommand "virtio-modules" {
-        nativeBuildInputs = with hostPkgs; [ xz zstd ];
+        nativeBuildInputs = with hostPkgs; [ xz zstd python3 ];
       } ''
         mkdir -p $out
-        for mod in virtio virtio_ring virtio_mmio virtio_blk; do
-          found=$(find ${qemuKernel}/lib/modules -name "''${mod}.ko" \
-                       -o -name "''${mod}.ko.xz" \
-                       -o -name "''${mod}.ko.zst" 2>/dev/null | head -1)
-          if [ -n "$found" ]; then
-            echo "virtio-modules: packaging $found"
-            case "$found" in
-              *.xz)  xz  -d -c "$found" > "$out/''${mod}.ko" ;;
-              *.zst) zstd -d "$found" -o "$out/''${mod}.ko"  ;;
-              *)     cp "$found" "$out/''${mod}.ko"           ;;
-            esac
-          else
-            echo "virtio-modules: WARNING — ''${mod}.ko not found in kernel" >&2
-          fi
-        done
+        python3 - ${qemuKernel} $out << 'PYEOF'
+import os, sys, subprocess, shutil
+
+kernel_out = sys.argv[1]
+out_dir    = sys.argv[2]
+
+modules_dir = os.path.join(kernel_out, "lib", "modules")
+if not os.path.isdir(modules_dir):
+    print(f"virtio-modules: no lib/modules in {kernel_out}", flush=True)
+    print(f"virtio-modules: kernel contents: {os.listdir(kernel_out)}", flush=True)
+    sys.exit(0)   # not a fatal error — just no modules to embed
+
+want = ["virtio", "virtio_ring", "virtio_mmio", "virtio_blk"]
+
+for modname in want:
+    found = None
+    for root, _dirs, files in os.walk(modules_dir):
+        for suffix in (modname + ".ko", modname + ".ko.xz", modname + ".ko.zst"):
+            if suffix in files:
+                found = os.path.join(root, suffix)
+                break
+        if found:
+            break
+
+    if found is None:
+        print(f"virtio-modules: WARNING — {modname} not found under {modules_dir}", flush=True)
+        continue
+
+    dest = os.path.join(out_dir, modname + ".ko")
+    print(f"virtio-modules: {found} → {dest}", flush=True)
+    if found.endswith(".xz"):
+        with open(dest, "wb") as f:
+            subprocess.run(["xz", "-d", "-c", found], stdout=f, check=True)
+    elif found.endswith(".zst"):
+        subprocess.run(["zstd", "-d", found, "-o", dest], check=True)
+    else:
+        shutil.copy2(found, dest)
+
+PYEOF
       '';
 
       picoMiniB-qemu-ab = mkSystem {
