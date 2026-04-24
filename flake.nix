@@ -303,16 +303,20 @@ RUNEOF
             "import socket; s=socket.socket(); s.bind((\"\",0)); \
              print(s.getsockname()[1]); s.close()")
 
-          # Layer a writable QCOW2 overlay on top of the read-only Nix store image.
-          # This lets the upgrade script flip the slot indicator and write to the
-          # inactive partition while the base image (and its MBR/slot byte) stays
-          # pristine for the next run.
-          OVERLAY=$(mktemp /tmp/luckfox-ab.XXXXXX.qcow2)
-          qemu-img create -f qcow2 \
-            -b ${picoMiniB-qemu-ab.config.system.build.sdImage}/sd-flashable.img \
-            -F raw "$OVERLAY" > /dev/null
-          cleanup() { rm -f "$OVERLAY"; }
-          trap cleanup EXIT
+          # Persistent overlay — survives across QEMU runs so slot changes and
+          # rootfs upgrades accumulate.  Pass --reset to start fresh from slot A.
+          OVERLAY="$HOME/.cache/luckfox-ab.qcow2"
+          mkdir -p "$(dirname "$OVERLAY")"
+
+          if [ "''${1:-}" = "--reset" ] || [ ! -f "$OVERLAY" ]; then
+            echo "qemu-ab: (re)creating overlay at $OVERLAY"
+            qemu-img create -f qcow2 \
+              -b ${picoMiniB-qemu-ab.config.system.build.sdImage}/sd-flashable.img \
+              -F raw "$OVERLAY" > /dev/null
+          else
+            echo "qemu-ab: reusing existing overlay at $OVERLAY"
+            echo "         (pass --reset to start fresh from slot A)"
+          fi
 
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  Luckfox Pico Mini B — QEMU A/B rootfs test (ARMv7 / 512 MB)"
@@ -324,7 +328,8 @@ RUNEOF
           echo "    nix build .#qemu-ab-rootfs"
           echo "    ssh root@localhost -p $SSH_PORT upgrade < result/rootfs.ext4"
           echo ""
-          echo "  Disk changes persist in overlay (reset by re-running)"
+          echo "  Slot changes and upgrades persist in: $OVERLAY"
+          echo "  Run with --reset to wipe the overlay and start from slot A"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
           qemu-system-arm \

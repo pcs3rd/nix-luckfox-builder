@@ -55,12 +55,13 @@
   system.zram.enable = lib.mkForce false;
 
   # ── A/B configuration targeting the virtio-blk device ──────────────────────
+  # lib.mkForce overrides the /dev/mmcblk0* defaults set by pico-mini-b.nix.
   system.abRootfs = {
-    enable    = true;
-    slotDisk  = "/dev/vda";    # whole virtio-blk disk (slot indicator lives here)
-    slotOffset = 512;          # byte offset of the indicator byte (sector 1)
-    slotA     = "/dev/vda1";   # partition 1 — slot A
-    slotB     = "/dev/vda2";   # partition 2 — slot B
+    enable     = true;
+    slotDisk   = lib.mkForce "/dev/vda";    # whole virtio-blk disk
+    slotOffset = lib.mkForce 512;           # byte offset of the indicator byte
+    slotA      = lib.mkForce "/dev/vda1";   # partition 1 — slot A
+    slotB      = lib.mkForce "/dev/vda2";   # partition 2 — slot B
   };
 
   # 512 MiB total → ~256 MiB per slot (sector 4096 onward, split in half).
