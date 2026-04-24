@@ -138,7 +138,7 @@ let
 
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox fs/bin/busybox
     chmod +x fs/bin/busybox
-    for cmd in sh mount umount dd switch_root sleep mdev blkid sed mkdir; do
+    for cmd in sh mount umount dd switch_root sleep mdev blkid sed mkdir head; do
       ln -sf busybox fs/bin/$cmd
     done
 
