@@ -94,6 +94,18 @@ let
     mount -t sysfs    sysfs    /sys
     mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 
+    # Wait for the slot disk to appear.  devtmpfs is populated as the kernel
+    # registers devices; on QEMU the virtio-blk driver can lag the initramfs
+    # by a few hundred milliseconds, especially on a warm reset.
+    i=0
+    while [ $i -lt 10 ] && [ ! -b "${cfg.slotDisk}" ]; do
+      sleep 1
+      i=$(( i + 1 ))
+    done
+    if [ ! -b "${cfg.slotDisk}" ]; then
+      echo "slot-select: WARNING — ${cfg.slotDisk} not found after 10 s, defaulting to slot A" >&2
+    fi
+
     # Read single slot indicator byte from the reserved raw disk location.
     SLOT=$(dd if="${cfg.slotDisk}" bs=1 skip=${toString cfg.slotOffset} count=1 2>/dev/null)
 
@@ -129,7 +141,7 @@ let
 
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox fs/bin/busybox
     chmod +x fs/bin/busybox
-    for cmd in sh mount umount dd switch_root; do
+    for cmd in sh mount umount dd switch_root sleep; do
       ln -sf busybox fs/bin/$cmd
     done
 
