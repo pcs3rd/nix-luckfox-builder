@@ -226,14 +226,55 @@ pkgs.runCommand "ox64-firmware-${BUILDROOT_REV}" {
   fi
 
   # ── Extract DTB ───────────────────────────────────────────────────────────
-  DTB_PATH=$(mdir -b -i "$SDIMG@@$FAT_OFFSET" 2>/dev/null \
-    | grep -i '\.dtb$' | head -1 | sed 's|^::||')
+  # The FAT partition may contain DTBs for multiple boards (ox64, sipeed-m1s,
+  # etc.).  Try the Ox64-specific name first; if absent, fall back to any DTB
+  # whose filename contains "ox64" or "pine64", then any DTB as last resort.
+  extract_dtb() {
+    local pattern="$1"
+    mdir -b -i "$SDIMG@@$FAT_OFFSET" 2>/dev/null \
+      | grep -i "$pattern" | head -1 | sed 's|^::||'
+  }
+
+  DTB_PATH=$(extract_dtb 'bl808-pine64-ox64\.dtb$')
+  [ -z "$DTB_PATH" ] && DTB_PATH=$(extract_dtb 'ox64.*\.dtb$\|pine64.*bl808.*\.dtb$')
+  [ -z "$DTB_PATH" ] && DTB_PATH=$(extract_dtb '\.dtb$')
+
   if [ -z "$DTB_PATH" ]; then
     echo "ERROR: no .dtb found in FAT partition" >&2
     mdir -i "$SDIMG@@$FAT_OFFSET" >&2; exit 1
   fi
   echo "ox64-firmware: extracting DTB: $DTB_PATH"
   mcopy -i "$SDIMG@@$FAT_OFFSET" "::$DTB_PATH" "$out/bl808-pine64-ox64.dtb"
+  # Sanity check: warn if we didn't get the Ox64-specific DTB
+  case "$DTB_PATH" in
+    *ox64*|*pine64*) ;;
+    *) echo "WARNING: extracted DTB ($DTB_PATH) may not be the Ox64 DTB — check FAT partition contents" >&2 ;;
+  esac
+
+  # ── Combined SPI flash image ──────────────────────────────────────────────
+  # Merges the three SPI flash components at their required offsets into a
+  # single file for direct SPI programmer flashing (flashrom, CH341A, etc.):
+  #
+  #   0x000000 — m0_lowload_bl808_m0.bin   M0 pre-loader
+  #   0x100000 — d0_lowload_bl808_d0.bin   D0 pre-loader
+  #   0x800000 — bl808-firmware.bin        OpenSBI + U-Boot
+  #
+  # Flash with:
+  #   flashrom -p ch341a_spi -c <chip> -w result/bl808-combined.bin
+  if [ -f "$out/bl808-firmware.bin" ]; then
+    # Allocate 8 MB (0x800000) + size of bl808-firmware.bin
+    FW_SIZE=$(wc -c < "$out/bl808-firmware.bin")
+    COMBINED_SIZE=$(( 0x800000 + FW_SIZE ))
+    dd if=/dev/zero bs=1 count=0 seek=$COMBINED_SIZE of="$out/bl808-combined.bin" 2>/dev/null
+    dd conv=notrunc if="$out/low_load_bl808_m0.bin" of="$out/bl808-combined.bin" 2>/dev/null
+    dd conv=notrunc if="$out/low_load_bl808_d0.bin" of="$out/bl808-combined.bin" \
+      seek=$((0x100000)) bs=1 2>/dev/null
+    dd conv=notrunc if="$out/bl808-firmware.bin" of="$out/bl808-combined.bin" \
+      seek=$((0x800000)) bs=1 2>/dev/null
+    echo "ox64-firmware: combined SPI image: $(( COMBINED_SIZE / 1024 ))K → $out/bl808-combined.bin"
+  else
+    echo "NOTE: bl808-firmware.bin absent — skipping bl808-combined.bin" >&2
+  fi
 
   # ── Verify ────────────────────────────────────────────────────────────────
   for f in Image bl808-pine64-ox64.dtb low_load_bl808_d0.bin low_load_bl808_m0.bin; do
