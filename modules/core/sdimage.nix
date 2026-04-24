@@ -217,12 +217,16 @@ EXTEOF
     # "dd bs=1 count=0 seek=N" is NOT equivalent — on Linux, GNU dd with
     # count=0 transfers nothing and does NOT extend the output file to the
     # seek position, leaving a 0-byte file.  truncate is unambiguous.
+    echo "DBG: PART_SIZE_BYTES=$PART_SIZE_BYTES  PART_SIZE_SECTORS=$PART_SIZE_SECTORS"
+    echo "DBG: staging contents: $(ls staging/ | head -20)"
     truncate -s $PART_SIZE_BYTES part1.img
+    echo "DBG: part1.img after truncate: $(ls -lh part1.img)"
     mkfs.ext4 \
       -d staging \
       -L rootfs-a \
       -E lazy_itable_init=0,lazy_journal_init=0 \
       part1.img
+    echo "DBG: part1.img after mkfs.ext4: $(file part1.img)"
 
     # ── Embed partition 1 into disk image ────────────────────────────────────
     dd if=part1.img of=$out/sd-flashable.img bs=512 seek=$SECTOR conv=notrunc 2>/dev/null
