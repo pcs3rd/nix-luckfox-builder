@@ -367,7 +367,7 @@ RUNEOF
             -M virt \
             -cpu cortex-a7 \
             -m 512M \
-            -bios ${hostPkgs.ubootQemuArm}/u-boot.bin \
+            -bios ${hostPkgs.pkgsCross.armv7l-hf-multiplatform.ubootQemuArm}/u-boot.bin \
             -drive "file=$OVERLAY,format=qcow2,if=virtio" \
             -nographic \
             -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
