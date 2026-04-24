@@ -56,7 +56,41 @@
       # ── System evaluations ──────────────────────────────────────────────────
       picoMiniB         = mkSystem   { configuration = ./configuration.nix;             };
       picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix;  };
-      picoMiniB-qemu-ab = mkSystem   { configuration = ./configurations/qemu-ab.nix;    };
+      # Virtio kernel modules for QEMU A/B testing — virtio_blk is a module
+      # (not built-in) in the standard ARM kernel, so we find and decompress
+      # the relevant .ko files and embed them in the slot-select initramfs.
+      virtioModules = hostPkgs.runCommand "virtio-modules" {
+        nativeBuildInputs = with hostPkgs; [ xz zstd ];
+      } ''
+        mkdir -p $out
+        for mod in virtio virtio_ring virtio_mmio virtio_blk; do
+          found=$(find ${qemuKernel}/lib/modules -name "''${mod}.ko" \
+                       -o -name "''${mod}.ko.xz" \
+                       -o -name "''${mod}.ko.zst" 2>/dev/null | head -1)
+          if [ -n "$found" ]; then
+            echo "virtio-modules: packaging $found"
+            case "$found" in
+              *.xz)  xz  -d -c "$found" > "$out/''${mod}.ko" ;;
+              *.zst) zstd -d "$found" -o "$out/''${mod}.ko"  ;;
+              *)     cp "$found" "$out/''${mod}.ko"           ;;
+            esac
+          else
+            echo "virtio-modules: WARNING — ''${mod}.ko not found in kernel" >&2
+          fi
+        done
+      '';
+
+      picoMiniB-qemu-ab = mkSystem {
+        configuration = [
+          ./configurations/qemu-ab.nix
+          {
+            # Embed the virtio block driver modules so the slot-select
+            # initramfs can insmod them before probing for labeled partitions.
+            # virtioModules is a directory; ab-rootfs.nix copies all *.ko from it.
+            system.abRootfs.extraKernelModules = [ virtioModules ];
+          }
+        ];
+      };
       picoMiniB-vm      = mkSystem   { configuration = ./configurations/qemu-vm.nix;    };
       picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;    };
       picoMiniB-ab      = mkSystem   { configuration = ./configurations/sdimage-ab.nix; };

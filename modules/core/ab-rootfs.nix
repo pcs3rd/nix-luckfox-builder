@@ -77,6 +77,16 @@ let
     mount -t sysfs    sysfs    /sys
     mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 
+    # Load any kernel modules embedded at build time (e.g. virtio_blk for QEMU).
+    # Three passes handle simple dependency chains without needing modprobe/depmod.
+    if [ -n "$(ls /lib/modules/*.ko 2>/dev/null)" ]; then
+      for pass in 1 2 3; do
+        for ko in /lib/modules/*.ko; do
+          [ -f "$ko" ] && insmod "$ko" 2>/dev/null || true
+        done
+      done
+    fi
+
     # Poll until blkid can find the slot A partition by label.  Each iteration
     # re-runs mdev -s so that partition device nodes are created as the kernel
     # scans the partition table — the disk may appear in /sys/block before its
@@ -137,13 +147,21 @@ let
   slotSelectInitramfs = pkgs.runCommand "slot-select-initramfs" {
     nativeBuildInputs = with pkgs.buildPackages; [ cpio gzip ];
   } ''
-    mkdir -p fs/{bin,proc,sys,dev,newroot}
+    mkdir -p fs/{bin,lib/modules,proc,sys,dev,newroot}
 
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox fs/bin/busybox
     chmod +x fs/bin/busybox
-    for cmd in sh mount umount dd switch_root sleep mdev blkid sed mkdir head cat; do
+    for cmd in sh mount umount dd switch_root sleep mdev blkid sed mkdir head cat insmod; do
       ln -sf busybox fs/bin/$cmd
     done
+
+    ${lib.concatMapStrings (entry: ''
+      if [ -d ${entry} ]; then
+        find ${entry} -name '*.ko' -exec cp {} fs/lib/modules/ \;
+      else
+        cp ${entry} fs/lib/modules/
+      fi
+    '') cfg.extraKernelModules}
 
     cp ${slotSelectInit} fs/init
     chmod +x fs/init

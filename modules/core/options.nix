@@ -546,6 +546,19 @@ with lib;
         default     = "rootfs-b";
         description = "Filesystem label of the slot B ext4 partition.";
       };
+
+      extraKernelModules = mkOption {
+        type        = types.listOf types.path;
+        default     = [];
+        description = ''
+          List of kernel module (.ko) files or directories of .ko files to
+          embed in the slot-select initramfs and insmod before probing for
+          block devices.  Use this to supply drivers (e.g. virtio_blk) that
+          are compiled as modules rather than built into the kernel.  Modules
+          are loaded in alphabetical order with three retries to satisfy
+          simple dependency chains.
+        '';
+      };
     };
 
     system.build = {

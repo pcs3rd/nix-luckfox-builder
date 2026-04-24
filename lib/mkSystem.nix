@@ -1,13 +1,12 @@
 { pkgs, lib }:
 
+# configuration may be a single module (path or attrset) or a list of modules.
 { configuration }:
 
 lib.evalModules {
   specialArgs = { inherit pkgs lib; };
 
-  modules = [
-    configuration
-
+  modules = lib.toList configuration ++ [
     ../modules/core/options.nix
     ../modules/core/rootfs.nix
     ../modules/core/services.nix
