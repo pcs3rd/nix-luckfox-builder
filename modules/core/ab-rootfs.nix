@@ -92,6 +92,10 @@ let
 
     if [ -z "$SLOT_A_DEV" ]; then
       echo "slot-select: FATAL — no partition with LABEL=${cfg.slotLabelA} after 20 s" >&2
+      echo "slot-select: known block devices:" >&2
+      cat /proc/partitions 2>/dev/null >&2 || true
+      echo "slot-select: blkid output:" >&2
+      blkid 2>/dev/null >&2 || true
       exec /bin/sh
     fi
 
@@ -137,7 +141,7 @@ let
 
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox fs/bin/busybox
     chmod +x fs/bin/busybox
-    for cmd in sh mount umount dd switch_root sleep mdev blkid sed mkdir head; do
+    for cmd in sh mount umount dd switch_root sleep mdev blkid sed mkdir head cat; do
       ln -sf busybox fs/bin/$cmd
     done
 
