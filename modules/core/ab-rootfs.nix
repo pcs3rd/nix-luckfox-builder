@@ -77,27 +77,26 @@ let
     mount -t sysfs    sysfs    /sys
     mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 
-    # Re-scan /sys and create any device nodes that devtmpfs may have missed.
-    # This is especially important on QEMU warm resets where virtio-blk
-    # enumeration can race ahead of the devtmpfs mount.
-    mdev -s 2>/dev/null || true
-
-    # Wait for at least one block device to appear in /sys/block.
+    # Poll until blkid can find the slot A partition by label.  Each iteration
+    # re-runs mdev -s so that partition device nodes are created as the kernel
+    # scans the partition table — the disk may appear in /sys/block before its
+    # partition entries are fully enumerated.
     i=0
-    while [ $i -lt 10 ] && [ -z "$(ls /sys/block/ 2>/dev/null)" ]; do
-      sleep 1
+    SLOT_A_DEV=""
+    while [ $i -lt 20 ] && [ -z "$SLOT_A_DEV" ]; do
+      mdev -s 2>/dev/null || true
+      SLOT_A_DEV=$(blkid -t LABEL="${cfg.slotLabelA}" -o device 2>/dev/null | head -1)
+      [ -z "$SLOT_A_DEV" ] && sleep 1
       i=$(( i + 1 ))
     done
 
-    # Locate partitions by filesystem label — device-name-agnostic.
-    # Works for /dev/vda1, /dev/mmcblk0p1, /dev/sda1, etc.
-    SLOT_A_DEV=$(blkid -t LABEL="${cfg.slotLabelA}" -o device 2>/dev/null | head -1)
-    SLOT_B_DEV=$(blkid -t LABEL="${cfg.slotLabelB}" -o device 2>/dev/null | head -1)
-
     if [ -z "$SLOT_A_DEV" ]; then
-      echo "slot-select: FATAL — no partition with LABEL=${cfg.slotLabelA}" >&2
+      echo "slot-select: FATAL — no partition with LABEL=${cfg.slotLabelA} after 20 s" >&2
       exec /bin/sh
     fi
+
+    # Locate slot B by label (optional — falls back to slot A if absent).
+    SLOT_B_DEV=$(blkid -t LABEL="${cfg.slotLabelB}" -o device 2>/dev/null | head -1)
 
     # Derive the whole disk from the partition path:
     #   /dev/vda1      → /dev/vda
