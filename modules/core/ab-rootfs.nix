@@ -79,12 +79,14 @@ let
 
     # Load any kernel modules embedded at build time (e.g. virtio_blk for QEMU).
     # Three passes handle simple dependency chains without needing modprobe/depmod.
+    echo "slot-select: modules in initramfs: $(ls /lib/modules/ 2>/dev/null || echo '(none)')"
     if [ -n "$(ls /lib/modules/*.ko 2>/dev/null)" ]; then
       for pass in 1 2 3; do
         for ko in /lib/modules/*.ko; do
-          [ -f "$ko" ] && insmod "$ko" 2>/dev/null || true
+          [ -f "$ko" ] && insmod "$ko" 2>&1 || true
         done
       done
+      echo "slot-select: loaded modules: $(cat /proc/modules 2>/dev/null | cut -d' ' -f1 | tr '\n' ' ' || echo '(none)')"
     fi
 
     # Poll until blkid can find the slot A partition by label.  Each iteration
