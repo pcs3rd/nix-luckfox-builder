@@ -51,49 +51,15 @@
         crossSystem = { config = "armv7l-unknown-linux-musleabihf"; };
       };
 
-      # ── Cross-compilation packages for Pine64 Ox64 (BL808 RV64 musl) ────────
-      #
-      # The BL808's Linux core is an RV64GCV (C906) @ 480 MHz.  We target
-      # riscv64-unknown-linux-musl, the same musl-first strategy as ARMv7.
-      #
-      # NOTE: riscv64 packages in nixpkgs-unstable are less aggressively cached
-      # than ARM.  Expect longer first-time build times on a cold Nix store.
-      pkgsRv64 = import nixpkgs {
-        inherit system;
-        crossSystem = { config = "riscv64-unknown-linux-musl"; };
-        overlays = [
-          (final: prev: {
-            # ── Tcl cross-compilation fix ───────────────────────────────────
-            # When cross-compiling from macOS, Tcl's configure incorrectly
-            # stamps -DMAC_OSX_TCL=1 into config.h and enables the macOS
-            # compat/mkstemp.c shim.  That shim is missing #include <string.h>
-            # (upstream bug), causing a hard build error on riscv64-musl:
-            #   mkstemp.c: error: implicit declaration of function 'strlen'
-            # Patch in the missing include so the build completes.
-            tcl = prev.tcl.overrideAttrs (old: {
-              postPatch = (old.postPatch or "") + ''
-                sed -i 's|#include <unistd.h>|#include <unistd.h>\n#include <string.h>|' \
-                  compat/mkstemp.c
-              '';
-            });
-          })
-        ];
-      };
-
-      mkSystem   = import ./lib/mkSystem.nix { inherit pkgs;    lib = pkgs.lib;    };
-      mkSystemRv = import ./lib/mkSystem.nix { pkgs = pkgsRv64; lib = pkgsRv64.lib; };
+      mkSystem   = import ./lib/mkSystem.nix { inherit pkgs; lib = pkgs.lib; };
 
       # ── System evaluations ──────────────────────────────────────────────────
       picoMiniB         = mkSystem   { configuration = ./configuration.nix;             };
       picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix;  };
+      picoMiniB-qemu-ab = mkSystem   { configuration = ./configurations/qemu-ab.nix;    };
       picoMiniB-vm      = mkSystem   { configuration = ./configurations/qemu-vm.nix;    };
       picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;    };
       picoMiniB-ab      = mkSystem   { configuration = ./configurations/sdimage-ab.nix; };
-
-      # Pine64 Ox64 — RISC-V 64-bit (BL808 C906 core)
-      # Build: nix build .#packages.<system>.ox64
-      # See hardware/ox64.nix for kernel/dtb setup instructions.
-      ox64 = mkSystemRv { configuration = ./configurations/ox64.nix; };
 
       # ── QEMU runner (initramfs) ──────────────────────────────────────────────
       qemu-test = hostPkgs.writeShellApplication {
@@ -300,6 +266,82 @@ RUNEOF
         '';
       };
 
+      # ── QEMU A/B disk image ─────────────────────────────────────────────────────
+      #
+      # A raw MBR disk image with two ext4 partitions (slot A and slot B).  The
+      # slot indicator byte 'a' is pre-written at byte 512.  No Rockchip SPL or
+      # U-Boot is present — QEMU loads the kernel directly.
+      #
+      # The layout mirrors the real Luckfox Pico Mini B A/B layout so the same
+      # /bin/upgrade and /bin/slot scripts work unmodified in QEMU.
+      #
+      # Built by the existing sdimage.nix module; with rockchip.enable = false the
+      # bootloader-blob dd calls are skipped and we get a clean two-partition image.
+      qemu-ab-disk = picoMiniB-qemu-ab.config.system.build.sdImage;
+
+      # Standalone ext4 image for the upgrade workflow:
+      #   nix build .#qemu-ab-rootfs
+      #   ssh root@localhost -p <port> upgrade < result/rootfs.ext4
+      qemu-ab-rootfs = picoMiniB-qemu-ab.config.system.build.rootfsPartition;
+
+      # ── QEMU A/B launcher ────────────────────────────────────────────────────
+      #
+      # Starts a QEMU VM that exercises the full A/B boot path:
+      #   1. Kernel + slot-select initramfs loaded directly by QEMU.
+      #   2. Initramfs reads the slot byte from /dev/vda (the virtio disk).
+      #   3. Mounts /dev/vda1 (slot A) or /dev/vda2 (slot B) as root.
+      #   4. switch_root into the rootfs; /sbin/init continues boot normally.
+      #
+      # A QCOW2 overlay is layered on top of the Nix-store disk so writes
+      # (including upgrade's slot-flip) persist for the QEMU session but the
+      # base image stays read-only.  Each invocation starts from slot A.
+      qemu-ab = hostPkgs.writeShellApplication {
+        name = "qemu-ab-luckfox";
+        runtimeInputs = with hostPkgs; [ qemu python3 ];
+        text = ''
+          SSH_PORT=$(python3 -c \
+            "import socket; s=socket.socket(); s.bind((\"\",0)); \
+             print(s.getsockname()[1]); s.close()")
+
+          # Layer a writable QCOW2 overlay on top of the read-only Nix store image.
+          # This lets the upgrade script flip the slot indicator and write to the
+          # inactive partition while the base image (and its MBR/slot byte) stays
+          # pristine for the next run.
+          OVERLAY=$(mktemp /tmp/luckfox-ab.XXXXXX.qcow2)
+          qemu-img create -f qcow2 \
+            -b ${picoMiniB-qemu-ab.config.system.build.sdImage}/sd-flashable.img \
+            -F raw "$OVERLAY" > /dev/null
+          cleanup() { rm -f "$OVERLAY"; }
+          trap cleanup EXIT
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Luckfox Pico Mini B — QEMU A/B rootfs test (ARMv7 / 512 MB)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Serial console below  (Ctrl-A X to quit QEMU)"
+          echo "  SSH: ssh root@localhost -p $SSH_PORT"
+          echo ""
+          echo "  Test A/B upgrade:"
+          echo "    nix build .#qemu-ab-rootfs"
+          echo "    ssh root@localhost -p $SSH_PORT upgrade < result/rootfs.ext4"
+          echo ""
+          echo "  Disk changes persist in overlay (reset by re-running)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          qemu-system-arm \
+            -M virt \
+            -cpu cortex-a7 \
+            -m 512M \
+            -kernel ${qemuKernel}/zImage \
+            -initrd ${picoMiniB-qemu-ab.config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz \
+            -append "${picoMiniB-qemu-ab.config.boot.cmdline}" \
+            -drive "file=$OVERLAY,format=qcow2,if=virtio" \
+            -nographic \
+            -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
+            -device virtio-net-device,netdev=net0 \
+            -device virtio-rng-device
+        '';
+      };
+
     in {
       packages = {
         # Real hardware outputs
@@ -330,14 +372,13 @@ RUNEOF
         qemu-vm-bundle    = qemu-vm-bundle;
         qemu-vm           = qemu-vm;
 
-        # Pine64 Ox64 (BL808 RV64 musl) — see configurations/ox64.nix
-        # Fill in BUILDROOT_SHA256 in pkgs/ox64-firmware.nix before building.
-        ox64-firmware     = import ./pkgs/ox64-firmware.nix { pkgs = hostPkgs; };
-        ox64-rootfs       = ox64.config.system.build.rootfs;
-        ox64-image        = ox64.config.system.build.image;
-        # Full 2-partition SD image (FAT32 boot + ext4 rootfs).
-        # Flash directly: dd if=result/ox64-sdcard.img of=/dev/sdX bs=4M status=progress
-        ox64-sd-image     = ox64.config.system.build.ox64SdImage;
+        # A/B rootfs QEMU test — full slot-select boot path in a VM.
+        # nix run .#qemu-ab                     — launch the VM
+        # nix build .#qemu-ab-disk              — the raw A/B disk image
+        # nix build .#qemu-ab-rootfs            — standalone ext4 for upgrade testing
+        qemu-ab           = qemu-ab;
+        qemu-ab-disk      = qemu-ab-disk;
+        qemu-ab-rootfs    = qemu-ab-rootfs;
       };
 
       apps = lib.optionalAttrs (lib.hasSuffix "-linux" system) {
@@ -352,6 +393,10 @@ RUNEOF
         qemu-vm = {
           type    = "app";
           program = "${qemu-vm}/bin/qemu-vm-luckfox";
+        };
+        qemu-ab = {
+          type    = "app";
+          program = "${qemu-ab}/bin/qemu-ab-luckfox";
         };
       };
 

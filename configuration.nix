@@ -17,8 +17,7 @@ in
 
 {
   imports = [
-    #./hardware/pico-mini-b.nix
-    ./hardware/ox64.nix
+    ./hardware/pico-mini-b.nix
   ];
 
   # ── Extra packages ──────────────────────────────────────────────────────────
@@ -41,12 +40,17 @@ in
   # ── System ──────────────────────────────────────────────────────────────────
 
   # USB OTG port mode — "host" | "device" | "otg" (auto/ID-pin, default)
+  #system.usb.mode = "host";
+
+  # USB gadget — exposes virtual functions when the OTG port is in device mode.
+  # "acm" gives a CDC-ACM serial console; connect with: screen /dev/ttyACM0 115200
   system.usb.mode = "device";
   system.usbGadget = {
     enable    = true;
     functions = [ "acm" ];
-    product   = "Ox64";
+    product   = "Luckfox";
   };
+
   # Compressed RAM swap — ~96 MB effective swap on a 64 MB board at near-zero latency.
   system.zram = {
     enable    = true;
@@ -61,6 +65,18 @@ in
     bootloaderPin = -1;   # -1 = double-tap reset (RP2040); set for BOOT pin (STM32/nRF)
   };
 
+  # ── A/B rootfs (zero-downtime SSH upgrades) ─────────────────────────────────
+  # When enabled, the image gains two equal-size rootfs partitions and a tiny
+  # slot-select initramfs that mounts the active one at boot.  /bin/upgrade
+  # and /bin/slot are added to the rootfs automatically.
+  #
+  # Build:   nix build .#sdImage-ab
+  # Flash:   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
+  # Upgrade: nix build .#rootfsPartition
+  #          ssh root@luckfox upgrade < result/rootfs.ext4
+  #
+  system.abRootfs.enable = true;
+
   # ── Bootloader ──────────────────────────────────────────────────────────────
   boot.uboot = {
     enable  = true;
@@ -73,7 +89,7 @@ in
   # ── Services ────────────────────────────────────────────────────────────────
 
   services.getty.enable = true;    # serial console on ttyS0
-  services.ssh.enable   = true;   # dropbear SSH; set users.root.hashedPassword first
+  services.ssh.enable   = true;    # dropbear SSH; set users.root.hashedPassword first
 
   # mesh-bbs: minimal Meshtastic BBS + store-and-forward bot.
   # Commands via direct message: bbs list/read/post, snf send/list
@@ -137,5 +153,5 @@ in
   # ── Users ───────────────────────────────────────────────────────────────────
   # Generate a new hash with:  openssl passwd -6 yourpassword
   # The default "!" locks the root account (no password login).
-  users.root.hashedPassword = "$6$vW4NFpymQUO5omMq$Z1vcrtaS7bawg02BETzqGTpy35wWgqPMBeFKua6KyETDPUlEVvEldJ8EiR931L1UXnLMlBb/PgGhbnPnVo1/81"; # password: 1234
+  users.root.hashedPassword = "!";
 }

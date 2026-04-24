@@ -1,12 +1,11 @@
 # nix-luckfox-builder
 
-A NixOS-style firmware builder for small RISC-V and ARM Linux SBCs.
+A NixOS-style firmware builder for the Luckfox Pico Mini B.
 Produces flashable SD card images, rootfs trees, and QEMU test environments
 from a single declarative `configuration.nix`.
 
 Supported boards:
 - **Luckfox Pico Mini B** — Rockchip RV1103, ARMv7 musl
-- **Pine64 Ox64** — Bouffalo BL808, RV64 musl *(see setup note below)*
 
 ---
 
@@ -69,52 +68,6 @@ from Apple Silicon, or `.#packages.x86_64-linux.<target>` from Linux.
 
 ---
 
-### Pine64 Ox64 *(experimental)*
-
-| Property | Value |
-|---|---|
-| SoC | Bouffalo BL808 |
-| CPU | RV64GCV (C906) @ 480 MHz (Linux core) |
-| RAM | 64 MB PSRAM |
-| libc | musl (riscv64-unknown-linux-musl) |
-| Kernel | OpenBouffalo buildroot v1.0.1 (Linux 6.x) |
-| Bootloader | OpenBouffalo U-Boot (pre-flashed on SD p1) |
-| Hardware profile | `hardware/ox64.nix` |
-| Configuration | `configurations/ox64.nix` |
-
-**One-time kernel setup:** The kernel Image and DTB are fetched from the
-OpenBouffalo GitHub release and pinned by SHA256 hash. Run this once to
-register the hash, then you never need to touch it again:
-
-```sh
-nix-prefetch-url --unpack \
-  https://github.com/openbouffalo/buildroot_bouffalo/releases/download/v1.0.1/bl808-linux-pine64_ox64_full_defconfig.tar.gz
-# Paste the printed hash into BUILDROOT_SHA256 in pkgs/ox64-firmware.nix
-```
-
-**SD card layout:** The Ox64 boots from a two-partition SD card.
-Use the OpenBouffalo `sdcard.img` for partition 1 (FAT32 boot + U-Boot),
-then write the Nix rootfs image to partition 2:
-
-```sh
-# Write OpenBouffalo boot partition (provides U-Boot + pre-loaders)
-dd if=sdcard.img of=/dev/sdX bs=4M status=progress
-
-# Overwrite partition 2 with the Nix rootfs
-nix build .#packages.aarch64-darwin.ox64-image
-dd if=result/sd.img of=/dev/sdX2 bs=4M status=progress
-```
-
-**Build targets:**
-
-| `nix build .#<target>` | Output | Use |
-|---|---|---|
-| `ox64-rootfs` | rootfs directory tree | Inspect or repack |
-| `ox64-image` | `result/sd.img` | Write to SD partition 2 |
-| `ox64-firmware` | kernel Image + DTB + blobs | Fetched blobs only |
-
----
-
 ## QEMU targets
 
 No real hardware needed. All QEMU targets emulate an ARMv7 Cortex-A7
@@ -125,12 +78,47 @@ No real hardware needed. All QEMU targets emulate an ARMv7 Cortex-A7
 | `nix run .#qemu-test` | Boot initramfs in QEMU (stateless, fast) |
 | `nix run .#qemu-vm` | Boot from QCOW2 disk with ephemeral overlay |
 | `nix run .#qemu-overlay` | Boot rootfs.img with ephemeral QCOW2 overlay |
+| `nix run .#qemu-ab` | Boot A/B disk with slot-select initramfs (see below) |
 | `nix build .#qemu-vm-bundle` | Build a portable dir with QCOW2 + kernel + `run.sh` |
 | `nix build .#qemu-vm-disk` | Build standalone compressed QCOW2 image |
 | `nix build .#qemu-initramfs` | Build initramfs cpio.gz only |
+| `nix build .#qemu-ab-disk` | Build raw A/B disk image (MBR + two ext4 partitions) |
+| `nix build .#qemu-ab-rootfs` | Build standalone ext4 image for upgrade testing |
 
 SSH forwarding is set up automatically on a random free port; the port number
 is printed at startup. Exit QEMU with **Ctrl-A X**.
+
+### Testing A/B upgrades in QEMU
+
+`nix run .#qemu-ab` boots a VM that exercises the full A/B upgrade path —
+the same slot-select initramfs, `/bin/upgrade`, and `/bin/slot` scripts that
+run on real hardware, but targeting a virtio-blk disk instead of an SD card.
+
+The disk is a raw MBR image with two ext4 partitions and the slot indicator
+byte pre-written at byte 512. A QCOW2 overlay is layered on top so writes
+(including slot flips and rootfs upgrades) persist for the lifetime of the
+QEMU process, but the base image stays pristine — each `nix run` starts fresh
+from slot A.
+
+```sh
+# Terminal 1 — start the VM (prints SSH port at startup)
+nix run .#qemu-ab
+
+# Terminal 2 — inspect current slot
+ssh root@localhost -p <port> slot
+# active:  A  /dev/vda1
+# standby: B  /dev/vda2
+
+# Build a new rootfs and stream it to the inactive slot
+nix build .#qemu-ab-rootfs
+ssh root@localhost -p <port> upgrade < result/rootfs.ext4
+# VM reboots automatically into slot B
+
+# Reconnect and confirm the flip
+ssh root@localhost -p <port> slot
+# active:  B  /dev/vda2
+# standby: A  /dev/vda1
+```
 
 ---
 
@@ -143,7 +131,7 @@ sections — hardware, packages, system, services, networking, users.
 { pkgs, ... }:
 let localPkgs = import ./pkgs { inherit pkgs; };
 in {
-  imports = [ ./hardware/pico-mini-b.nix ];  # or ./hardware/ox64.nix
+  imports = [ ./hardware/pico-mini-b.nix ];
 
   packages = with localPkgs; [ sysinfo htop nano meshtastic-cli ];
 
@@ -166,7 +154,7 @@ system.usb = {
 ```
 
 The Luckfox RV1103 role switch path (`fcd00000.usb-role-switch`) is
-pre-populated in `hardware/pico-mini-b.nix`. The Ox64 path is auto-detected.
+pre-populated in `hardware/pico-mini-b.nix`.
 
 ### USB gadget / serial console
 
@@ -371,7 +359,6 @@ Reference them in `configuration.nix` via `localPkgs.<name>`.
 |---|---|---|---|
 | `uboot` | 2024.01-luckfox | [luckfox-eng29/luckfox-pico](https://github.com/luckfox-eng29/luckfox-pico) @ `438d5270` | U-Boot SPL + `u-boot.img` for RV1103 |
 | `luckfox-kernel-modules` | 5.10-luckfox | [luckfox-eng29/luckfox-pico](https://github.com/luckfox-eng29/luckfox-pico) @ `438d5270` | Vendor kernel modules (`lib/modules/`) for `=m` drivers |
-| `ox64-firmware` | v1.0.1 | [openbouffalo/buildroot_bouffalo](https://github.com/openbouffalo/buildroot_bouffalo) | Ox64 kernel Image + DTB + M0/D0 pre-loader blobs; fetched by hash |
 
 > **Updating a pinned package:** Change the `_REV` constant in the relevant
 > `pkgs/*.nix` file, then run `nix-prefetch-github <owner> <repo> --rev <newrev>`
@@ -418,11 +405,11 @@ configuration.nix          Main system configuration (edit this)
 configurations/
   qemu-test.nix            QEMU initramfs test config
   qemu-vm.nix              QEMU disk-image VM config
+  qemu-ab.nix              QEMU A/B rootfs test config (slot-select initramfs)
   sdimage.nix              Flashable SD image with overlayfs
-  ox64.nix                 Pine64 Ox64 (BL808 RV64) config
+  sdimage-ab.nix           Flashable A/B SD image (two rootfs partitions)
 hardware/
   pico-mini-b.nix          Luckfox Pico Mini B hardware profile
-  ox64.nix                 Pine64 Ox64 hardware profile
 pkgs/
   default.nix              Package registry
   mesh-bbs/                Minimal Meshtastic BBS + SNF bot
@@ -433,7 +420,6 @@ pkgs/
   rf24.nix                 RF24 library (nrfnet dep)
   meshtasticd.nix          Linux-native Meshtastic daemon
   uboot.nix                U-Boot for RV1103
-  ox64-firmware.nix        OpenBouffalo kernel/DTB fetcher
   sysinfo/                 Lightweight system-info tool (C)
   htop.nix                 htop
   nano.nix                 nano
@@ -441,7 +427,8 @@ modules/
   core/
     options.nix            All Nix module options
     rootfs.nix             Rootfs builder
-    sdimage.nix            Flashable SD image builder
+    sdimage.nix            Flashable SD image builder (single or A/B)
+    ab-rootfs.nix          A/B rootfs: slot-select initramfs, /bin/upgrade, /bin/slot
     mcu.nix                /bin/mcu GPIO helper
     usb.nix                USB OTG role switch
     usb-gadget.nix         USB gadget stack (CDC-ACM console, ECM, RNDIS, mass storage)
