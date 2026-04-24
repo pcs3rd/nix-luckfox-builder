@@ -79,60 +79,60 @@ let
 
     # Load any kernel modules embedded at build time (e.g. virtio_blk for QEMU).
     # Three passes handle simple dependency chains without needing modprobe/depmod.
-    echo "slot-select: modules in initramfs: $(ls /lib/modules/ 2>/dev/null || echo '(none)')"
     if [ -n "$(ls /lib/modules/*.ko 2>/dev/null)" ]; then
+      echo "slot-select: loading modules: $(ls /lib/modules/)"
       for pass in 1 2 3; do
         for ko in /lib/modules/*.ko; do
           [ -f "$ko" ] && insmod "$ko" 2>&1 || true
         done
       done
-      echo "slot-select: loaded modules: $(cat /proc/modules 2>/dev/null | cut -d' ' -f1 | tr '\n' ' ' || echo '(none)')"
     fi
 
-    # Poll until blkid can find the slot A partition by label.  Each iteration
-    # re-runs mdev -s so that partition device nodes are created as the kernel
-    # scans the partition table — the disk may appear in /sys/block before its
-    # partition entries are fully enumerated.
+    # Wait for the first real block disk to appear in /proc/partitions.
+    # Re-run mdev -s each iteration so partition device nodes are created as
+    # the kernel finishes scanning.  Skip RAM disks, MTD flash, and loop devices;
+    # skip partition entries (names ending in a digit) to get only whole disks.
     i=0
-    SLOT_A_DEV=""
-    while [ $i -lt 20 ] && [ -z "$SLOT_A_DEV" ]; do
+    DISK=""
+    while [ $i -lt 20 ] && [ -z "$DISK" ]; do
       mdev -s 2>/dev/null || true
-      SLOT_A_DEV=$(blkid -t LABEL="${cfg.slotLabelA}" -o device 2>/dev/null | head -1)
-      [ -z "$SLOT_A_DEV" ] && sleep 1
+      DISK=$(awk 'NR>2 { n=$NF
+        if (n ~ /^(ram|loop|mtdblock)/) next
+        if (n ~ /[0-9]$/) next
+        print "/dev/" n; exit
+      }' /proc/partitions 2>/dev/null)
+      [ -z "$DISK" ] && sleep 1
       i=$(( i + 1 ))
     done
 
-    if [ -z "$SLOT_A_DEV" ]; then
-      echo "slot-select: FATAL — no partition with LABEL=${cfg.slotLabelA} after 20 s" >&2
-      echo "slot-select: known block devices:" >&2
-      cat /proc/partitions 2>/dev/null >&2 || true
-      echo "slot-select: blkid output:" >&2
-      blkid 2>/dev/null >&2 || true
+    if [ -z "$DISK" ]; then
+      echo "slot-select: FATAL — no block device found after 20 s" >&2
+      cat /proc/partitions >&2
       exec /bin/sh
     fi
 
-    # Locate slot B by label (optional — falls back to slot A if absent).
-    SLOT_B_DEV=$(blkid -t LABEL="${cfg.slotLabelB}" -o device 2>/dev/null | head -1)
-
-    # Derive the whole disk from the partition path:
-    #   /dev/vda1      → /dev/vda
-    #   /dev/mmcblk0p1 → /dev/mmcblk0
-    DISK=$(echo "$SLOT_A_DEV" | sed -E 's/p?[0-9]+$//')
+    # Derive slot partition paths from the disk name.
+    # mmcblk* and nvme* use a 'p' prefix before the partition number;
+    # everything else (vda, sda, …) uses bare digits.
+    case "$DISK" in
+      *mmcblk* | *nvme*) SLOT_A="${DISK}p1"; SLOT_B="${DISK}p2" ;;
+      *)                 SLOT_A="${DISK}1";  SLOT_B="${DISK}2"  ;;
+    esac
 
     # Read single slot indicator byte from the reserved raw disk location.
     SLOT=$(dd if="$DISK" bs=1 skip=${toString cfg.slotOffset} count=1 2>/dev/null)
 
-    if [ "$SLOT" = "b" ] && [ -n "$SLOT_B_DEV" ]; then
-      ROOT="$SLOT_B_DEV"
+    if [ "$SLOT" = "b" ]; then
+      ROOT="$SLOT_B"
     else
-      ROOT="$SLOT_A_DEV"
+      ROOT="$SLOT_A"
       SLOT=a
     fi
-    echo "slot-select: slot=$SLOT  disk=$DISK  root=$ROOT"
+    echo "slot-select: disk=$DISK  slot=$SLOT  root=$ROOT"
 
     if ! mount "$ROOT" /newroot; then
-      echo "slot-select: WARNING — $ROOT failed, falling back to $SLOT_A_DEV" >&2
-      mount "$SLOT_A_DEV" /newroot || {
+      echo "slot-select: WARNING — $ROOT failed, falling back to $SLOT_A" >&2
+      mount "$SLOT_A" /newroot || {
         echo "slot-select: FATAL — cannot mount any slot; dropping to shell" >&2
         exec /bin/sh
       }
@@ -153,7 +153,7 @@ let
 
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox fs/bin/busybox
     chmod +x fs/bin/busybox
-    for cmd in sh mount umount dd switch_root sleep mdev blkid sed mkdir head cat insmod; do
+    for cmd in sh mount umount dd switch_root sleep mdev awk mkdir cat insmod; do
       ln -sf busybox fs/bin/$cmd
     done
 
