@@ -10,7 +10,7 @@
 #   Sector 1 (byte 512): slot indicator byte 'a'
 #   Sector 64         : Rockchip SPL / idbloader
 #   Sector 16384      : U-Boot proper
-#   Sector 4096       : ext4 rootfs A (partition 1) — kernel + initramfs + rootfs
+#   Sector 4096       : ext4 rootfs A (partition 1) — kernel + boot.scr + initramfs + rootfs
 #   Following p1      : ext4 rootfs B (partition 2) — rootfs only
 #
 # Build with:
@@ -37,8 +37,8 @@
   # Each slot gets half the total image size.  512 MiB total → 256 MiB / slot.
   system.imageSize = lib.mkDefault 512;
 
-  # The kernel command line becomes a fallback; the slot-select initramfs
-  # overrides root= at runtime.  Keep it pointing at slot A for safety.
-  boot.cmdline = lib.mkDefault
-    "console=ttyS0 root=/dev/mmcblk0p1 rw rootfstype=ext4 rootwait";
+  # boot.scr (U-Boot distro boot) sets root=LABEL=... dynamically.
+  # extlinux.conf (fallback) uses the slot-select initramfs which handles
+  # root mounting itself — no root= needed here for either path.
+  boot.cmdline = lib.mkDefault "console=ttyS0 init=/sbin/init panic=1";
 }

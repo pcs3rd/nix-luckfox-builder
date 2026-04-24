@@ -18,11 +18,13 @@
 #   Offset 0x200 (byte      512): slot indicator byte ('a')  ← written here
 #   Offset 0x020 (sector    64) : Rockchip SPL / idbloader  ← if provided
 #   Offset 0x800 00 (sec 16384) : U-Boot proper              ← if provided
-#   Offset 0x100 000  (2 MiB)  : ext4 rootfs A (partition 1) ← kernel + initramfs + rootfs
+#   Offset 0x100 000  (2 MiB)  : ext4 rootfs A (partition 1) ← kernel + boot.scr + rootfs
 #   Following p1               : ext4 rootfs B (partition 2) ← rootfs only
 #
-#   extlinux.conf in partition 1 references the slot-select initramfs so the
-#   bootloader passes control to it before mounting any rootfs partition.
+#   boot.scr (U-Boot distro boot, primary path): reads raw sector 1, sets
+#   root=LABEL=rootfs-{a,b}, loads kernel — device-agnostic (mmc or virtio).
+#   extlinux.conf (fallback): references the slot-select initramfs, which
+#   mounts the active partition and switch_root's into it.
 #
 # macOS-compatible: uses mkfs.ext4 -d to populate the filesystem from a
 # directory — no losetup or mount required.
@@ -37,6 +39,34 @@ let
 
   # Sector at which partition 1 starts (2 MiB = 4096 × 512 B sectors).
   partStartSector = 4096;
+
+  # ── U-Boot A/B slot-select boot script ───────────────────────────────────
+  # Compiled with mkimage and placed at /boot.scr in partition 1.
+  # U-Boot's distro_bootcmd finds it before extlinux.conf and runs it directly.
+  #
+  # Uses distro_bootcmd environment variables for portability:
+  #   ${devtype}          — "mmc"    (real hardware)  or "virtio" (QEMU)
+  #   ${devnum}           — device index (0 for the first device)
+  #   ${distro_bootpart}  — partition where boot.scr was found (1)
+  #
+  # The slot indicator byte at raw sector 1 ('a' or 'b') is read directly
+  # by U-Boot before the kernel starts — no initramfs needed for slot select.
+  abBootScript = pkgs.writeText "ab-boot-script.txt" ''
+    ''${devtype} read ''${loadaddr} 1 1
+    if itest.b *''${loadaddr} == 0x62; then
+        echo "A/B: slot B active  (${abCfg.slotLabelB})"
+        setenv rootlabel ${abCfg.slotLabelB}
+    else
+        echo "A/B: slot A active  (${abCfg.slotLabelA})"
+        setenv rootlabel ${abCfg.slotLabelA}
+    fi
+    setenv bootargs "${config.boot.cmdline} root=LABEL=''${rootlabel} rootwait rw"
+    echo "bootargs: ''${bootargs}"
+    ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r} /zImage
+    ${lib.optionalString (config.device.dtb != null) ''
+      ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r} /${config.device.name}.dtb
+    ''}bootz ''${kernel_addr_r} - ''${fdt_addr_r}
+  '';
 in
 
 {
@@ -44,6 +74,7 @@ in
     nativeBuildInputs = with pkgs.buildPackages; [
       e2fsprogs   # mkfs.ext4 with -d flag
       python3     # MBR partition-table writer
+      ubootTools  # mkimage — compiles the A/B boot script
     ];
   } ''
     mkdir -p $out
@@ -155,9 +186,16 @@ PYEOF
     ''}
 
     ${lib.optionalString abCfg.enable ''
-      # Copy slot-select initramfs into the staging directory.
+      # Copy slot-select initramfs (extlinux.conf fallback path).
       cp ${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz \
          staging/initramfs-slotselect.cpio.gz
+
+      # Compile U-Boot boot script (primary A/B boot path).
+      # U-Boot distro_bootcmd finds boot.scr before extlinux.conf, reads the
+      # raw slot indicator byte from sector 1, and boots the active partition
+      # without needing an initramfs — works on both MMC and virtio (QEMU).
+      mkimage -A arm -O linux -T script -C none -a 0 -e 0 \
+        -n "A/B slot select" -d ${abBootScript} staging/boot.scr
     ''}
 
     mkdir -p staging/extlinux

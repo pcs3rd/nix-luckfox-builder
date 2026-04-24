@@ -56,62 +56,23 @@
       # ── System evaluations ──────────────────────────────────────────────────
       picoMiniB         = mkSystem   { configuration = ./configuration.nix;             };
       picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix;  };
-      # Virtio kernel modules for QEMU A/B testing — virtio_blk is a module
-      # (not built-in) in the standard ARM kernel, so we find and decompress
-      # the relevant .ko files and embed them in the slot-select initramfs.
-      virtioModules = hostPkgs.runCommand "virtio-modules" {
-        nativeBuildInputs = with hostPkgs; [ xz zstd python3 ];
-      } ''
-        mkdir -p $out
-        python3 - ${qemuKernel} $out << 'PYEOF'
-import os, sys, subprocess, shutil
-
-kernel_out = sys.argv[1]
-out_dir    = sys.argv[2]
-
-modules_dir = os.path.join(kernel_out, "lib", "modules")
-if not os.path.isdir(modules_dir):
-    print(f"virtio-modules: no lib/modules in {kernel_out}", flush=True)
-    print(f"virtio-modules: kernel contents: {os.listdir(kernel_out)}", flush=True)
-    sys.exit(0)   # not a fatal error — just no modules to embed
-
-want = ["virtio", "virtio_ring", "virtio_mmio", "virtio_blk"]
-
-for modname in want:
-    found = None
-    for root, _dirs, files in os.walk(modules_dir):
-        for suffix in (modname + ".ko", modname + ".ko.xz", modname + ".ko.zst"):
-            if suffix in files:
-                found = os.path.join(root, suffix)
-                break
-        if found:
-            break
-
-    if found is None:
-        print(f"virtio-modules: WARNING — {modname} not found under {modules_dir}", flush=True)
-        continue
-
-    dest = os.path.join(out_dir, modname + ".ko")
-    print(f"virtio-modules: {found} → {dest}", flush=True)
-    if found.endswith(".xz"):
-        with open(dest, "wb") as f:
-            subprocess.run(["xz", "-d", "-c", found], stdout=f, check=True)
-    elif found.endswith(".zst"):
-        subprocess.run(["zstd", "-d", found, "-o", dest], check=True)
-    else:
-        shutil.copy2(found, dest)
-
-PYEOF
-      '';
-
+      # ── QEMU A/B system evaluation ─────────────────────────────────────────
+      #
+      # Uses the same sdimage.nix SD image builder as real hardware — the only
+      # QEMU-specific differences are:
+      #   • device.kernel → qemuKernel (ARM cross-compiled Linux from nixpkgs)
+      #   • boot.uboot.enable = false  (U-Boot is provided via -bios, not embedded)
+      #   • rockchip.enable  = false   (no Rockchip SPL/idbloader blobs)
+      #
+      # sdimage.nix generates boot.scr (U-Boot distro boot script) in partition 1.
+      # U-Boot reads the raw slot indicator byte from sector 1, sets root=LABEL=…,
+      # and loads the kernel from partition 1 — no initramfs needed for slot select.
       picoMiniB-qemu-ab = mkSystem {
         configuration = [
           ./configurations/qemu-ab.nix
           {
-            # Embed the virtio block driver modules so the slot-select
-            # initramfs can insmod them before probing for labeled partitions.
-            # virtioModules is a directory; ab-rootfs.nix copies all *.ko from it.
-            system.abRootfs.extraKernelModules = [ virtioModules ];
+            # Supply the QEMU ARM kernel so sdimage.nix copies it into partition 1.
+            device.kernel = "${qemuKernel}/zImage";
           }
         ];
       };
@@ -119,15 +80,30 @@ PYEOF
       picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;    };
       picoMiniB-ab      = mkSystem   { configuration = ./configurations/sdimage-ab.nix; };
 
-      # ── QEMU runner (initramfs) ──────────────────────────────────────────────
+      # ── QEMU test disk (read-only ext4 image of the rootfs) ─────────────────
+      qemu-test-disk = hostPkgs.runCommand "luckfox-test.img" {
+        nativeBuildInputs = [ hostPkgs.e2fsprogs ];
+      } ''
+        truncate -s 512M $out
+        mkfs.ext4 \
+          -d ${picoMiniB-qemu.config.system.build.rootfs} \
+          -L rootfs \
+          -E lazy_itable_init=0,lazy_journal_init=0 \
+          $out
+      '';
+
+      # ── QEMU runner (read-only virtio-blk disk) ──────────────────────────────
+      #
+      # The rootfs is served as a raw ext4 image on a read-only virtio-blk
+      # device (/dev/vda).  No initramfs — the kernel mounts the disk directly.
+      # This is closer to real hardware (eMMC/SD read-only rootfs) than the old
+      # initramfs approach, and exercises the virtio-blk path explicitly.
       qemu-test = hostPkgs.writeShellApplication {
         name = "qemu-test-luckfox";
 
         runtimeInputs = [ hostPkgs.qemu hostPkgs.python3 ];
 
         text = ''
-          # Pick a free ephemeral port for SSH forwarding so we never
-          # collide with whatever else is already running on the host.
           SSH_PORT=$(python3 -c \
             "import socket; s=socket.socket(); s.bind((\"\",0)); \
              print(s.getsockname()[1]); s.close()")
@@ -136,17 +112,17 @@ PYEOF
           echo "  Luckfox Pico Mini B — QEMU virt (ARMv7 Cortex-A7)"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  Serial console below (Ctrl-A X to exit QEMU)"
-          echo "  SSH: ssh root@localhost -p $SSH_PORT"
+          echo "  SSH: ssh root@localhost -p ''${SSH_PORT}"
+          echo "  Rootfs: read-only virtio-blk (/dev/vda)"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo ""
 
           exec qemu-system-arm \
             -M virt \
             -cpu cortex-a7 \
             -m 512M \
             -kernel ${qemuKernel}/zImage \
-            -initrd ${picoMiniB-qemu.config.system.build.initramfs} \
             -append "${picoMiniB-qemu.config.boot.cmdline}" \
+            -drive "file=${qemu-test-disk},format=raw,if=virtio,readonly=on" \
             -nographic \
             -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
             -device virtio-net-device,netdev=net0 \
@@ -324,17 +300,15 @@ RUNEOF
         '';
       };
 
-      # ── QEMU A/B disk image ─────────────────────────────────────────────────────
+      # ── QEMU A/B disk image ─────────────────────────────────────────────────
       #
-      # A raw MBR disk image with two ext4 partitions (slot A and slot B).  The
-      # slot indicator byte 'a' is pre-written at byte 512.  No Rockchip SPL or
-      # U-Boot is present — QEMU loads the kernel directly.
+      # The unified SD image built by sdimage.nix — same builder as real hardware.
+      # Contains: MBR, slot indicator 'a' at byte 512, two equal ext4 partitions.
+      # Partition 1: rootfs A + qemuKernel/zImage + boot.scr + extlinux.conf
+      # Partition 2: rootfs B
       #
-      # The layout mirrors the real Luckfox Pico Mini B A/B layout so the same
-      # /bin/upgrade and /bin/slot scripts work unmodified in QEMU.
-      #
-      # Built by the existing sdimage.nix module; with rockchip.enable = false the
-      # bootloader-blob dd calls are skipped and we get a clean two-partition image.
+      # U-Boot (provided via -bios) loads boot.scr, reads the slot indicator byte,
+      # and boots the active partition with root=LABEL=… — no initramfs needed.
       qemu-ab-disk = picoMiniB-qemu-ab.config.system.build.sdImage;
 
       # Standalone ext4 image for the upgrade workflow:
@@ -342,17 +316,15 @@ RUNEOF
       #   ssh root@localhost -p <port> upgrade < result/rootfs.ext4
       qemu-ab-rootfs = picoMiniB-qemu-ab.config.system.build.rootfsPartition;
 
-      # ── QEMU A/B launcher ────────────────────────────────────────────────────
+      # ── QEMU A/B launcher (U-Boot firmware) ─────────────────────────────────
       #
-      # Starts a QEMU VM that exercises the full A/B boot path:
-      #   1. Kernel + slot-select initramfs loaded directly by QEMU.
-      #   2. Initramfs reads the slot byte from /dev/vda (the virtio disk).
-      #   3. Mounts /dev/vda1 (slot A) or /dev/vda2 (slot B) as root.
-      #   4. switch_root into the rootfs; /sbin/init continues boot normally.
+      # U-Boot initializes, scans the virtio disk, finds boot.scr in partition 1,
+      # reads the raw slot indicator byte, and boots the kernel with root= pointing
+      # at the active slot partition.  No initramfs is involved — the kernel mounts
+      # /dev/vda1 or /dev/vda2 directly (virtio_blk is built into the kernel).
       #
-      # A QCOW2 overlay is layered on top of the Nix-store disk so writes
-      # (including upgrade's slot-flip) persist for the QEMU session but the
-      # base image stays read-only.  Each invocation starts from slot A.
+      # The same /bin/upgrade and /bin/slot scripts from the rootfs manage slot
+      # switching by writing to the raw disk byte, exactly as on real hardware.
       qemu-ab = hostPkgs.writeShellApplication {
         name = "qemu-ab-luckfox";
         runtimeInputs = with hostPkgs; [ qemu python3 ];
@@ -369,7 +341,7 @@ RUNEOF
           if [ "''${1:-}" = "--reset" ] || [ ! -f "$OVERLAY" ]; then
             echo "qemu-ab: (re)creating overlay at $OVERLAY"
             qemu-img create -f qcow2 \
-              -b ${picoMiniB-qemu-ab.config.system.build.sdImage}/sd-flashable.img \
+              -b ${qemu-ab-disk}/sd-flashable.img \
               -F raw "$OVERLAY" > /dev/null
           else
             echo "qemu-ab: reusing existing overlay at $OVERLAY"
@@ -378,13 +350,14 @@ RUNEOF
 
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  Luckfox Pico Mini B — QEMU A/B rootfs test (ARMv7 / 512 MB)"
+          echo "  Boot: U-Boot (-bios) → boot.scr → slot indicator → root=LABEL=…"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  Serial console below  (Ctrl-A X to quit QEMU)"
-          echo "  SSH: ssh root@localhost -p $SSH_PORT"
+          echo "  SSH: ssh root@localhost -p ''${SSH_PORT}"
           echo ""
           echo "  Test A/B upgrade:"
           echo "    nix build .#qemu-ab-rootfs"
-          echo "    ssh root@localhost -p $SSH_PORT upgrade < result/rootfs.ext4"
+          echo "    ssh root@localhost -p ''${SSH_PORT} upgrade < result/rootfs.ext4"
           echo ""
           echo "  Slot changes and upgrades persist in: $OVERLAY"
           echo "  Run with --reset to wipe the overlay and start from slot A"
@@ -394,9 +367,7 @@ RUNEOF
             -M virt \
             -cpu cortex-a7 \
             -m 512M \
-            -kernel ${qemuKernel}/zImage \
-            -initrd ${picoMiniB-qemu-ab.config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz \
-            -append "${picoMiniB-qemu-ab.config.boot.cmdline}" \
+            -bios ${hostPkgs.ubootQemuArm}/u-boot.bin \
             -drive "file=$OVERLAY,format=qcow2,if=virtio" \
             -nographic \
             -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
@@ -428,7 +399,7 @@ RUNEOF
         # On Darwin without a builder, omit them rather than failing the whole
         # flake evaluation.
       } // lib.optionalAttrs (lib.hasSuffix "-linux" system) {
-        qemu-initramfs    = picoMiniB-qemu.config.system.build.initramfs;
+        qemu-test-disk    = qemu-test-disk;
         qemu-test         = qemu-test;
         qemu-overlay      = qemu-overlay;
         qemu-vm-disk      = qemu-vm-disk;

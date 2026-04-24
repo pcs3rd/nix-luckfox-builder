@@ -1,11 +1,10 @@
 # QEMU test configuration for the Luckfox Pico Mini B rootfs.
 #
 # Inherits everything from configuration.nix and overrides only what differs
-# for QEMU's generic "virt" ARM machine (Cortex-A7, 256 MiB):
+# for QEMU's generic "virt" ARM machine (Cortex-A7):
 #   - Serial console on ttyAMA0  (PL011 UART, not ttyS0)
-#   - Kernel + initramfs passed directly to QEMU (-kernel / -initrd)
+#   - Kernel passed directly to QEMU; rootfs served as a read-only virtio-blk disk
 #   - Network via virtio-net (udhcpc on eth0)
-#   - SSH forwarded to host port 2222
 #
 # U-Boot and the Rockchip layout are forced off — QEMU loads the kernel
 # directly, bypassing the bootloader entirely.
@@ -21,8 +20,8 @@
   # Distinguish the QEMU hostname from real hardware
   networking.hostname = lib.mkForce "luckfox-qemu";
 
-  # Boot the initramfs directly — no disk, no root= needed
-  boot.cmdline = lib.mkForce "console=ttyAMA0 rdinit=/sbin/init panic=1";
+  # Boot from the virtio-blk disk QEMU attaches as /dev/vda (read-only).
+  boot.cmdline = lib.mkForce "console=ttyAMA0 root=/dev/vda ro init=/sbin/init panic=1";
 
   # configuration.nix enables these; force them off for QEMU
   boot.uboot.enable = lib.mkForce false;
