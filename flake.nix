@@ -40,7 +40,17 @@
         crossSystem = lib.systems.examples.armv7l-hf-multiplatform;
       };
 
-      qemuKernel = linuxPkgs.linuxPackages.kernel;
+      # Override the QEMU ARM kernel to add CONFIG_OVERLAY_FS=y.
+      # The default armv7l defconfig omits overlayfs; we need it for the
+      # squashfs + overlayfs A/B rootfs scheme.  This triggers a kernel rebuild
+      # the first time, but the result is cached in the Nix store.
+      qemuKernel = (linuxPkgs.linuxPackages.extend (self: super: {
+        kernel = super.kernel.override {
+          structuredExtraConfig = with lib.kernel; {
+            OVERLAY_FS = yes;
+          };
+        };
+      })).kernel;
 
       # ── Host packages (no crossSystem) ─────────────────────────────────────
       hostPkgs = import nixpkgs { inherit system; };

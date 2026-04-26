@@ -214,11 +214,12 @@ let
     done
 
     ${lib.concatMapStrings (entry: ''
-      if [ -d ${entry} ]; then
-        find ${entry} -name '*.ko' -exec cp {} fs/lib/modules/ \;
-      else
-        cp ${entry} fs/lib/modules/
+      if [ -d "${entry}" ]; then
+        find "${entry}" -name '*.ko' -exec cp {} fs/lib/modules/ \; 2>/dev/null || true
+      elif [ -f "${entry}" ]; then
+        cp "${entry}" fs/lib/modules/
       fi
+      # If path doesn't exist the module is built into the kernel — skip silently.
     '') cfg.extraKernelModules}
 
     cp ${slotSelectInit} fs/init
