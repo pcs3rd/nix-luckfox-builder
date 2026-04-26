@@ -71,8 +71,9 @@
             WIRELESS        = no;
             WLAN            = no;
             # Framebuffer / DRM: serial console only (ttyAMA0), no display
-            FB              = no;
-            DRM             = no;
+            # common-config.nix forces DRM=y, so we need mkForce to override.
+            FB              = lib.mkForce no;
+            DRM             = lib.mkForce no;
             VGA_CONSOLE     = no;
             # PCMCIA / CardBus: not present on virt machine
             PCCARD          = no;
