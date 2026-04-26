@@ -247,7 +247,8 @@ EXPAND_EOF
             for f in "$entry"*; do
               [ -e "$f" ] || continue
               name=$(basename "$f")
-              if [ ! -e "$out/bin/$name" ] && [ ! -e "$out/sbin/$name" ]; then
+              if [ ! -e "$out/bin/$name" ] && [ ! -L "$out/bin/$name" ] && \
+                 [ ! -e "$out/sbin/$name" ] && [ ! -L "$out/sbin/$name" ]; then
                 cp -L "$f" "$out/$dirname/$name"
                 chmod +x "$out/$dirname/$name"
               fi
