@@ -28,7 +28,7 @@ in
     htop           # interactive process viewer
     nano           # text editor
     meshtastic-cli # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
-    # pkgs.pkgsStatic.util-linux # lsblk, blkid, etc. — static so no dynamic linker needed. Use this for qemu troubleshooting
+    pkgs.pkgsStatic.util-linux # lsblk, blkid, etc. — static so no dynamic linker needed. Use this for qemu troubleshooting
     # nrfnet is added automatically when services.nrfnet.enable = true
   ];
 
