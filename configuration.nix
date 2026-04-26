@@ -28,6 +28,7 @@ in
     htop           # interactive process viewer
     nano           # text editor
     meshtastic-cli # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
+    pkgs.util-linux # lsblk, blkid, etc.
     # nrfnet is added automatically when services.nrfnet.enable = true
   ];
 
