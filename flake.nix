@@ -59,49 +59,48 @@
             SQUASHFS_LZ4    = yes;   # lz4 decompression for slot partitions
 
             # ── Subsystems never present on QEMU virt ───────────────────────
+            # All disabled with mkForce so common-config.nix can't override us.
             # USB: QEMU virt has no USB controller (gadget disabled in config)
-            USB_SUPPORT     = no;
-            USB             = no;
+            USB_SUPPORT     = lib.mkForce no;
+            USB             = lib.mkForce no;
             # Sound: no audio device or need
-            SOUND           = no;
-            SND             = no;
+            SOUND           = lib.mkForce no;
+            SND             = lib.mkForce no;
             # Bluetooth: no BT hardware
-            BT              = no;
+            BT              = lib.mkForce no;
             # Wireless / WLAN: virtio-net covers networking
-            WIRELESS        = no;
-            WLAN            = no;
+            WIRELESS        = lib.mkForce no;
+            WLAN            = lib.mkForce no;
             # Framebuffer / DRM: serial console only (ttyAMA0), no display
-            # common-config.nix forces DRM=y, so we need mkForce to override.
             FB              = lib.mkForce no;
             DRM             = lib.mkForce no;
-            VGA_CONSOLE     = no;
+            VGA_CONSOLE     = lib.mkForce no;
             # PCMCIA / CardBus: not present on virt machine
-            PCCARD          = no;
+            PCCARD          = lib.mkForce no;
             # InfiniBand: not needed
-            INFINIBAND      = no;
+            INFINIBAND      = lib.mkForce no;
             # Industrial I/O: no sensors
-            IIO             = no;
+            IIO             = lib.mkForce no;
 
             # ── Unneeded filesystems ────────────────────────────────────────
             # Keep: ext4, squashfs, overlayfs, tmpfs, proc, sysfs, devtmpfs
-            BTRFS_FS        = no;
-            XFS_FS          = no;
-            JFS_FS          = no;
-            REISERFS_FS     = no;
-            OCFS2_FS        = no;
-            GFS2_FS         = no;
-            NFS_FS          = no;
-            NFSD            = no;
-            CIFS            = no;
-            CEPH_FS         = no;
-            FUSE_FS         = no;   # not needed; remove if you use FUSE tools
-            NTFS_FS         = no;
+            BTRFS_FS        = lib.mkForce no;
+            XFS_FS          = lib.mkForce no;
+            JFS_FS          = lib.mkForce no;
+            REISERFS_FS     = lib.mkForce no;
+            OCFS2_FS        = lib.mkForce no;
+            GFS2_FS         = lib.mkForce no;
+            NFS_FS          = lib.mkForce no;
+            NFSD            = lib.mkForce no;
+            CIFS            = lib.mkForce no;
+            CEPH_FS         = lib.mkForce no;
+            FUSE_FS         = lib.mkForce no;   # remove if you need FUSE tools
+            NTFS_FS         = lib.mkForce no;
 
             # ── Kernel debug / tracing overhead ────────────────────────────
-            # Safe to remove for a lean test kernel
-            FTRACE          = no;
-            KPROBES         = no;
-            PERF_EVENTS     = no;
+            FTRACE          = lib.mkForce no;
+            KPROBES         = lib.mkForce no;
+            PERF_EVENTS     = lib.mkForce no;
           };
         };
       })).kernel;
