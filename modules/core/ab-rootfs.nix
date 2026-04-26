@@ -353,11 +353,12 @@ let
     nativeBuildInputs = with pkgs.buildPackages; [ squashfsTools ];
   } ''
     mkdir -p $out
+    # SOURCE_DATE_EPOCH is set by Nix for reproducibility; mksquashfs honours it
+    # automatically.  Do NOT also pass -mkfs-time/-all-time — mksquashfs treats
+    # both at once as a fatal conflict.
     mksquashfs ${config.system.build.rootfs} $out/rootfs.squashfs \
       -comp ${cfg.squashfsCompression} \
       -noappend \
-      -mkfs-time 0 \
-      -all-time 0 \
       -no-progress
     echo "squashfs size: $(du -sh $out/rootfs.squashfs | cut -f1)"
   '';
