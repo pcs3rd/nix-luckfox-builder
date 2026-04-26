@@ -311,10 +311,11 @@ RUNEOF
       # and boots the active partition with root=LABEL=… — no initramfs needed.
       qemu-ab-disk = picoMiniB-qemu-ab.config.system.build.sdImage;
 
-      # Standalone ext4 image for the upgrade workflow:
+      # Standalone ext4 image for the upgrade workflow — same derivation as the
+      # real-hardware rootfsPartition so QEMU tests validate the production image.
       #   nix build .#qemu-ab-rootfs
       #   ssh root@localhost -p <port> upgrade < result/rootfs.ext4
-      qemu-ab-rootfs = picoMiniB-qemu-ab.config.system.build.rootfsPartition;
+      qemu-ab-rootfs = picoMiniB-ab.config.system.build.rootfsPartition;
 
       # ── QEMU A/B launcher (U-Boot firmware) ─────────────────────────────────
       #

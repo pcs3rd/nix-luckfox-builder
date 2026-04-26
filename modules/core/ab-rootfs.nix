@@ -295,11 +295,13 @@ let
     nativeBuildInputs = with pkgs.buildPackages; [ e2fsprogs ];
   } ''
     mkdir -p $out
-    # Use 128 MiB by default; large enough for a typical NixOS-lite rootfs.
-    # The upgrade script uses `dd of="$TARGET"` which writes exactly as many
-    # bytes as it reads, so the partition on the device must be ≥ this size.
-    PART_BYTES=$(( 128 * 1024 * 1024 ))
-    dd if=/dev/zero of=$out/rootfs.ext4 bs=1 count=0 seek=$PART_BYTES 2>/dev/null
+    # Match the slot size from sdimage.nix exactly:
+    #   total image − 2 MiB gap (partStartSector=4096 × 512 B), split in half.
+    # The upgrade script streams this image with `dd of="$TARGET"`, so it must
+    # be ≤ the slot partition size on the device.
+    IMAGE_BYTES=$(( ${toString config.system.imageSize} * 1024 * 1024 ))
+    PART_BYTES=$(( (IMAGE_BYTES - 4096 * 512) / 2 ))
+    truncate -s $PART_BYTES $out/rootfs.ext4
     mkfs.ext4 \
       -d ${config.system.build.rootfs} \
       -L rootfs \
