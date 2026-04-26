@@ -35,7 +35,7 @@
 #   7. bootz starts the kernel; kernel finds the active partition by label.
 #   8. /sbin/init starts in the real rootfs — no initramfs involved.
 
-{ lib, ... }:
+{ pkgs, lib, ... }:
 
 {
   imports = [ ../configuration.nix ];
@@ -61,4 +61,14 @@
 
   # 512 MiB total → ~256 MiB per slot (sector 4096 onward, split in half).
   system.imageSize = lib.mkDefault 512;
+
+  # ── QEMU-only debug tools (not in production) ────────────────────────────
+  # lsblk is not in busybox; pull it from util-linux (musl cross-build → static).
+  packages = [
+    (pkgs.runCommand "qemu-debug-tools" {} ''
+      mkdir -p $out/sbin
+      cp -L $(find ${pkgs.util-linux} -name lsblk ! -type d | head -1) $out/sbin/lsblk
+      chmod +x $out/sbin/lsblk
+    '')
+  ];
 }

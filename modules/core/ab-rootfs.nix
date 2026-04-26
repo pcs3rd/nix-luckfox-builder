@@ -318,16 +318,13 @@ in
       system.build.rootfsPartition     = if cfg.enable then rootfsPartitionImage else null;
     }
     (lib.mkIf cfg.enable {
-      # Install upgrade, slot, and lsblk into the rootfs only when A/B is on.
-      # lsblk is not in busybox; pull it from util-linux (musl cross-build → static).
+      # Install upgrade and slot scripts into the rootfs only when A/B is on.
       packages = [
         (pkgs.runCommand "ab-rootfs-scripts" {} ''
-          mkdir -p $out/bin $out/sbin
+          mkdir -p $out/bin
           cp ${upgradeScript} $out/bin/upgrade
           cp ${slotScript}    $out/bin/slot
           chmod +x $out/bin/upgrade $out/bin/slot
-          cp -L $(find ${pkgs.util-linux} -name lsblk ! -type d | head -1) $out/sbin/lsblk
-          chmod +x $out/sbin/lsblk
         '')
       ];
     })
