@@ -40,14 +40,67 @@
         crossSystem = lib.systems.examples.armv7l-hf-multiplatform;
       };
 
-      # Override the QEMU ARM kernel to add CONFIG_OVERLAY_FS=y.
-      # The default armv7l defconfig omits overlayfs; we need it for the
-      # squashfs + overlayfs A/B rootfs scheme.  This triggers a kernel rebuild
-      # the first time, but the result is cached in the Nix store.
+      # Override the QEMU ARM kernel for the squashfs + overlayfs A/B scheme.
+      #
+      # Adds CONFIG_OVERLAY_FS (absent from the default armv7l defconfig) and
+      # strips drivers/subsystems that a QEMU virt machine never uses, reducing
+      # build time and the kernel image size.
+      #
+      # What this machine needs:
+      #   - ARM virt platform + PL011 UART (ttyAMA0)
+      #   - virtio-blk (/dev/vda), virtio-net (eth0), virtio-rng
+      #   - ext4 (boot + persist), squashfs + lz4 (slots), overlayfs, tmpfs
+      #   - TCP/IP stack for SSH (dropbear uses ChaCha20 + Ed25519)
       qemuKernel = (linuxPkgs.linuxPackages.extend (self: super: {
         kernel = super.kernel.override {
           structuredExtraConfig = with lib.kernel; {
-            OVERLAY_FS = yes;
+            # ── Required additions ──────────────────────────────────────────
+            OVERLAY_FS      = yes;   # overlayfs for writable rootfs layer
+            SQUASHFS_LZ4    = yes;   # lz4 decompression for slot partitions
+
+            # ── Subsystems never present on QEMU virt ───────────────────────
+            # USB: QEMU virt has no USB controller (gadget disabled in config)
+            USB_SUPPORT     = no;
+            USB             = no;
+            # Sound: no audio device or need
+            SOUND           = no;
+            SND             = no;
+            # Bluetooth: no BT hardware
+            BT              = no;
+            # Wireless / WLAN: virtio-net covers networking
+            WIRELESS        = no;
+            WLAN            = no;
+            # Framebuffer / DRM: serial console only (ttyAMA0), no display
+            FB              = no;
+            DRM             = no;
+            VGA_CONSOLE     = no;
+            # PCMCIA / CardBus: not present on virt machine
+            PCCARD          = no;
+            # InfiniBand: not needed
+            INFINIBAND      = no;
+            # Industrial I/O: no sensors
+            IIO             = no;
+
+            # ── Unneeded filesystems ────────────────────────────────────────
+            # Keep: ext4, squashfs, overlayfs, tmpfs, proc, sysfs, devtmpfs
+            BTRFS_FS        = no;
+            XFS_FS          = no;
+            JFS_FS          = no;
+            REISERFS_FS     = no;
+            OCFS2_FS        = no;
+            GFS2_FS         = no;
+            NFS_FS          = no;
+            NFSD            = no;
+            CIFS            = no;
+            CEPH_FS         = no;
+            FUSE_FS         = no;   # not needed; remove if you use FUSE tools
+            NTFS_FS         = no;
+
+            # ── Kernel debug / tracing overhead ────────────────────────────
+            # Safe to remove for a lean test kernel
+            FTRACE          = no;
+            KPROBES         = no;
+            PERF_EVENTS     = no;
           };
         };
       })).kernel;
