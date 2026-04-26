@@ -67,14 +67,17 @@ in
   };
 
   # ── A/B rootfs (zero-downtime SSH upgrades) ─────────────────────────────────
-  # When enabled, the image gains two equal-size rootfs partitions and a tiny
-  # slot-select initramfs that mounts the active one at boot.  /bin/upgrade
-  # and /bin/slot are added to the rootfs automatically.
+  # When enabled, the image uses squashfs slots + overlayfs for persistence:
+  #   p1 ext4 "boot"    — kernel + initramfs
+  #   p2 squashfs       — slot A rootfs (read-only, compressed)
+  #   p3 squashfs       — slot B rootfs (read-only, compressed)
+  #   p4 ext4 "persist" — overlay writable layer (survives reboots)
+  # /bin/upgrade and /bin/slot are added to the rootfs automatically.
   #
   # Build:   nix build .#sdImage-ab
   # Flash:   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
   # Upgrade: nix build .#rootfsPartition
-  #          ssh root@luckfox upgrade < result/rootfs.ext4
+  #          ssh root@luckfox upgrade < result/rootfs.squashfs
   #
   system.abRootfs.enable = true;
 

@@ -1,28 +1,28 @@
-# Flashable SD image with A/B rootfs for zero-downtime SSH upgrades.
+# Flashable SD image with A/B rootfs (squashfs + overlayfs) for Luckfox Pico Mini B.
 #
-# Inherits settings from configuration.nix and adds:
-#   - system.abRootfs: slot-select initramfs, /bin/upgrade, /bin/slot
-#   - sdimage.nix creates two equal-size rootfs partitions
-#   - Slot indicator byte 'a' written at sector 1 on initial flash
+# Disk layout:
+#   Sector 0            : MBR + partition table
+#   Sector 1 (byte 512) : slot indicator byte 'a'
+#   Sector 64           : Rockchip SPL / idbloader
+#   Sector 16384        : U-Boot proper
+#   p1 (ext4 "boot")    : kernel + initramfs + boot.scr + extlinux.conf
+#   p2 (squashfs)       : slot A rootfs  (read-only)
+#   p3 (squashfs)       : slot B rootfs  (read-only)
+#   p4 (ext4 "persist") : overlayfs upper/work dirs (survives upgrades)
 #
-# Disk layout (Luckfox Pico Mini B):
-#   Sector 0          : MBR + partition table
-#   Sector 1 (byte 512): slot indicator byte 'a'
-#   Sector 64         : Rockchip SPL / idbloader
-#   Sector 16384      : U-Boot proper
-#   Sector 4096       : ext4 rootfs A (partition 1) — kernel + boot.scr + initramfs + rootfs
-#   Following p1      : ext4 rootfs B (partition 2) — rootfs only
+# The initramfs (in p1) reads the slot indicator byte, mounts the active
+# squashfs slot via overlayfs on the persist partition, and switch_root's in.
 #
-# Build with:
-#   nix build .#sdImage-ab          # full SD card image (flash to card)
-#   nix build .#rootfsPartition     # standalone ext4 for SSH upgrades
+# Build:
+#   nix build .#sdImage-ab           # full SD card image
+#   nix build .#rootfsPartition      # standalone squashfs for SSH upgrades
 #
-# Flash with:
+# Flash:
 #   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
 #
 # Upgrade running device (after first flash):
 #   nix build .#rootfsPartition
-#   ssh root@luckfox upgrade < result/rootfs.ext4
+#   ssh root@luckfox upgrade < result/rootfs.squashfs
 #
 # Inspect active slot:
 #   ssh root@luckfox slot
@@ -34,11 +34,11 @@
 
   system.abRootfs.enable = true;
 
-  # Each slot gets half the total image size.  512 MiB total → 256 MiB / slot.
-  system.imageSize = lib.mkDefault 512;
+  # Each slot gets roughly half of (total − boot − persist).
+  # 2048 MiB total: p1=64 MiB, p4=256 MiB, p2=p3≈863 MiB each.
+  system.imageSize = lib.mkDefault 2048;
 
-  # boot.scr (U-Boot distro boot) sets root=LABEL=... dynamically.
-  # extlinux.conf (fallback) uses the slot-select initramfs which handles
-  # root mounting itself — no root= needed here for either path.
+  # boot.scr loads kernel + initramfs; initramfs sets root= via overlayfs.
+  # console=ttyS0 for the Luckfox hardware UART.
   boot.cmdline = lib.mkDefault "console=ttyS0 init=/sbin/init panic=1";
 }

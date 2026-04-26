@@ -1,4 +1,4 @@
-# A/B rootfs — zero-downtime over-SSH upgrades without bootloader involvement.
+# A/B rootfs — zero-downtime over-SSH upgrades with squashfs + overlayfs.
 #
 # ── How it works ─────────────────────────────────────────────────────────────
 #
@@ -7,78 +7,92 @@
 # Sector 1 sits between the MBR (sector 0) and the first bootloader stage and
 # is never touched by any filesystem or bootloader on either supported board.
 #
-# On every boot a tiny slot-select initramfs reads that byte, mounts the
-# matching rootfs partition, and exec's switch_root into it.  The bootloader
-# loads one fixed thing: the kernel + this initramfs.  No U-Boot env vars,
-# no fw_setenv, no CONFIG_ENV_OFFSET required.
-#
-# ── Board-specific disk layouts ──────────────────────────────────────────────
-#
-# Luckfox Pico Mini B (Rockchip RV1103):
+# ── Disk layout ──────────────────────────────────────────────────────────────
 #
 #   Sector    0 (  512 B) : MBR + partition table
 #   Sector    1 (  512 B) : slot indicator byte ('a' or 'b')  ← managed here
 #   Sectors 2–63          : unused / reserved
-#   Sector   64           : Rockchip SPL / idbloader
-#   Sector 16384          : U-Boot proper
-#   Sector 4096  ( 2 MiB) : ext4  rootfs A  (label: rootfs-a, /dev/mmcblk0p1)
-#   Sector 4096 + A size  : ext4  rootfs B  (label: rootfs-b, /dev/mmcblk0p2)
+#   Sector   64           : Rockchip SPL / idbloader  (raw, not a partition)
+#   Sector 16384          : U-Boot proper              (raw, not a partition)
 #
-#   The kernel and initramfs live in partition 1.  U-Boot always boots from
-#   there; the initramfs picks the active slot by filesystem label.
+#   Partition 1  (ext4,     label: "boot")    — kernel + initramfs + boot.scr
+#   Partition 2  (squashfs, no label)         — slot A rootfs  (read-only)
+#   Partition 3  (squashfs, no label)         — slot B rootfs  (read-only)
+#   Partition 4  (ext4,     label: "persist") — overlayfs upper/work dirs
 #
-#   Configuration:
-#     system.abRootfs = {
-#       enable  = true;
-#       # slotLabelA / slotLabelB default to "rootfs-a" / "rootfs-b"
-#     };
+# ── Boot path ────────────────────────────────────────────────────────────────
+#
+#   1. U-Boot finds boot.scr in partition 1, loads kernel + initramfs.
+#   2. Kernel starts with the slot-select initramfs as the initial root.
+#   3. The initramfs reads the slot indicator byte from the raw disk.
+#   4. It mounts the active squashfs slot (p2 or p3) at /squash.
+#   5. It mounts the persist ext4 partition (p4) at /persist.
+#   6. It creates /persist/slot-{a,b}/upper and /persist/slot-{a,b}/work.
+#   7. It mounts overlayfs: lower=/squash, upper/work in persist.
+#   8. exec switch_root into the overlay — the running rootfs is read-write.
+#
+#   Result: the rootfs is a live overlay.  Reads come from squashfs (fast,
+#   compressed, immutable).  Writes land in the persist partition and survive
+#   reboots.  Each slot has its own upper layer, so a fresh upgrade starts
+#   with an empty writable layer.
+#
+# ── Kernel requirements ───────────────────────────────────────────────────────
+#
+#   CONFIG_SQUASHFS=y  (+ CONFIG_SQUASHFS_LZ4=y for lz4 compression)
+#   CONFIG_OVERLAY_FS=y
+#
+#   If these are compiled as modules (=m), add them to extraKernelModules
+#   so the initramfs loads them before attempting to mount:
+#     system.abRootfs.extraKernelModules = [
+#       "${kernelModulesPath}/kernel/fs/squashfs/squashfs.ko"
+#       "${kernelModulesPath}/kernel/fs/overlayfs/overlay.ko"
+#     ];
 #
 # ── Upgrade workflow ──────────────────────────────────────────────────────────
 #
 # On the build host:
-#   nix build .#rootfsPartition          # raw ext4 image of the rootfs
-#   ssh root@device upgrade < result/rootfs.ext4
+#   nix build .#rootfsPartition         # produces result/rootfs.squashfs
+#   ssh root@device upgrade < result/rootfs.squashfs
 #
 # On the device, /bin/upgrade:
 #   1. Reads current slot from the raw disk offset
-#   2. Writes new rootfs to the INACTIVE partition (dd from stdin)
+#   2. Writes new squashfs to the INACTIVE partition (dd from stdin)
 #   3. Atomically flips the slot byte on disk
 #   4. Reboots into the new slot
 #
+# The persist partition is NOT cleared on upgrade.  Each slot has its own
+# overlay directory, so upgrading to slot B starts with a fresh upper layer.
+#
 # To inspect the active slot at runtime:   /bin/slot
+# To force a specific slot on next boot:   /bin/slot a   (or /bin/slot b)
 #
 # ── Configuration ─────────────────────────────────────────────────────────────
 #
 #   system.abRootfs = {
-#     enable     = true;
-#     slotOffset = 512;        # byte offset of the indicator (default: sector 1)
-#     slotLabelA = "rootfs-a"; # ext4 label of slot A partition (default)
-#     slotLabelB = "rootfs-b"; # ext4 label of slot B partition (default)
+#     enable              = true;
+#     slotOffset          = 512;        # byte offset of the indicator (default)
+#     bootPartLabel       = "boot";     # ext4 label of the boot partition
+#     bootPartSize        = 64;         # MiB
+#     persistLabel        = "persist";  # ext4 label of the persist partition
+#     persistSize         = 256;        # MiB
+#     squashfsCompression = "lz4";      # compression algorithm
 #   };
-#
-#   The disk device is derived at runtime from whichever partition carries
-#   slotLabelA, so no hardcoded device paths are needed.
-#
-# The SD image builder (sdimage.nix) detects A/B and:
-#   • creates two equal-size rootfs partitions
-#   • writes 'a' to the slot indicator sector
-#   • embeds INITRD /initramfs-slotselect.cpio.gz in extlinux.conf
 
 { pkgs, config, lib, ... }:
 
 let
   cfg = config.system.abRootfs;
 
-  # ── Slot-select init script (content baked at Nix build time) ─────────────
-  # Device paths are Nix-interpolated; $SLOT/$ROOT are runtime shell variables.
+  # ── Slot-select init script (runs as PID 1 in the initramfs) ─────────────
   slotSelectInit = pkgs.writeScript "slot-select-init" ''
     #!/bin/sh
     mount -t proc     proc     /proc
     mount -t sysfs    sysfs    /sys
     mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 
-    # Load any kernel modules embedded at build time (e.g. virtio_blk for QEMU).
-    # Three passes handle simple dependency chains without needing modprobe/depmod.
+    # Load any kernel modules embedded at build time
+    # (e.g. virtio_blk, squashfs, overlay).
+    # Three passes handle simple dependency chains without needing modprobe.
     if [ -n "$(ls /lib/modules/*.ko 2>/dev/null)" ]; then
       echo "slot-select: loading modules: $(ls /lib/modules/)"
       for pass in 1 2 3; do
@@ -111,12 +125,21 @@ let
       exec /bin/sh
     fi
 
-    # Derive slot partition paths from the disk name.
-    # mmcblk* and nvme* use a 'p' prefix before the partition number;
-    # everything else (vda, sda, …) uses bare digits.
+    # Derive partition paths from the disk name.
+    # Fixed layout: p1=boot(ext4), p2=slot-A(squashfs),
+    #               p3=slot-B(squashfs), p4=persist(ext4).
+    # mmcblk* and nvme* use a 'p' prefix before the partition number.
     case "$DISK" in
-      *mmcblk* | *nvme*) SLOT_A="''${DISK}p1"; SLOT_B="''${DISK}p2" ;;
-      *)                 SLOT_A="''${DISK}1";  SLOT_B="''${DISK}2"  ;;
+      *mmcblk* | *nvme*)
+        SLOT_A="''${DISK}p2"
+        SLOT_B="''${DISK}p3"
+        PERSIST="''${DISK}p4"
+        ;;
+      *)
+        SLOT_A="''${DISK}2"
+        SLOT_B="''${DISK}3"
+        PERSIST="''${DISK}4"
+        ;;
     esac
 
     # Read single slot indicator byte from the reserved raw disk location.
@@ -130,10 +153,40 @@ let
     fi
     echo "slot-select: disk=$DISK  slot=$SLOT  root=$ROOT"
 
-    if ! mount "$ROOT" /newroot; then
-      echo "slot-select: WARNING — $ROOT failed, falling back to $SLOT_A" >&2
-      mount "$SLOT_A" /newroot || {
-        echo "slot-select: FATAL — cannot mount any slot; dropping to shell" >&2
+    # ── Mount active squashfs slot ──────────────────────────────────────────
+    # Squashfs can be mounted directly from a raw partition — no loop device
+    # needed.  The kernel reads the squashfs superblock from the block device.
+    if ! mount -t squashfs "$ROOT" /squash; then
+      echo "slot-select: WARNING — $ROOT failed, falling back to slot A" >&2
+      mount -t squashfs "$SLOT_A" /squash || {
+        echo "slot-select: FATAL — cannot mount any squashfs slot" >&2
+        exec /bin/sh
+      }
+      SLOT=a
+    fi
+
+    # ── Mount persist partition for overlayfs upper/work dirs ───────────────
+    # Falls back to tmpfs if the persist partition isn't available yet
+    # (e.g. on first boot before persist is formatted, or in minimal test builds).
+    if mount -t ext4 "$PERSIST" /persist 2>/dev/null; then
+      echo "slot-select: persist=$PERSIST  (writes survive reboots)"
+    else
+      mount -t tmpfs tmpfs /persist
+      echo "slot-select: WARNING — no persist partition; using tmpfs (ephemeral)"
+    fi
+
+    mkdir -p /persist/slot-"$SLOT"/upper /persist/slot-"$SLOT"/work
+
+    # ── Overlay: squashfs lower + persist upper ─────────────────────────────
+    # The squashfs mount at /squash and persist at /persist remain live inside
+    # the kernel VFS even after switch_root discards the initramfs root — the
+    # overlay holds references to both.
+    if ! mount -t overlay overlay \
+        -o "lowerdir=/squash,upperdir=/persist/slot-$SLOT/upper,workdir=/persist/slot-$SLOT/work" \
+        /newroot; then
+      echo "slot-select: WARNING — overlay failed; binding squashfs read-only" >&2
+      mount --bind /squash /newroot || {
+        echo "slot-select: FATAL — cannot set up root" >&2
         exec /bin/sh
       }
     fi
@@ -145,11 +198,14 @@ let
     exec switch_root /newroot /sbin/init
   '';
 
-  # ── Slot-select initramfs (tiny cpio.gz: busybox + init script) ───────────
+  # ── Slot-select initramfs (tiny cpio.gz: busybox + init script) ──────────
   slotSelectInitramfs = pkgs.runCommand "slot-select-initramfs" {
     nativeBuildInputs = with pkgs.buildPackages; [ cpio gzip ];
   } ''
-    mkdir -p fs/{bin,lib/modules,proc,sys,dev,newroot}
+    # /squash  — squashfs lower layer mount point
+    # /persist — ext4 persist partition mount point
+    # /newroot — overlayfs mount point (becomes new root after switch_root)
+    mkdir -p fs/{bin,lib/modules,proc,sys,dev,squash,persist,newroot}
 
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox fs/bin/busybox
     chmod +x fs/bin/busybox
@@ -172,42 +228,47 @@ let
     ( cd fs && find . | cpio -o -H newc | gzip -9 ) > $out/initramfs-slotselect.cpio.gz
   '';
 
-  # ── /bin/upgrade ──────────────────────────────────────────────────────────
+  # ── /bin/upgrade ─────────────────────────────────────────────────────────
   upgradeScript = pkgs.writeScript "upgrade" ''
     #!/bin/sh
     #
-    # upgrade — stream a new rootfs image from stdin to the inactive slot,
-    #           flip the slot indicator, and reboot.
+    # upgrade — stream a new squashfs rootfs image from stdin to the inactive
+    #           slot, flip the slot indicator, and reboot.
     #
     # From the build host:
     #   nix build .#rootfsPartition
-    #   ssh root@luckfox upgrade < result/rootfs.ext4
+    #   ssh root@device upgrade < result/rootfs.squashfs
     #
-    # With compression (saves transfer time):
-    #   gzip -c result/rootfs.ext4 | ssh root@luckfox "gunzip | upgrade"
+    # With compression (saves transfer bandwidth):
+    #   gzip -c result/rootfs.squashfs | ssh root@device "gunzip | upgrade"
 
     OFFSET="${toString cfg.slotOffset}"
 
-    # Refuse to run if stdin is a terminal — a rootfs image must be piped in.
+    # Refuse to run if stdin is a terminal — a squashfs image must be piped in.
     if [ -t 0 ]; then
-      echo "upgrade: error: no input detected — pipe a rootfs image into this command" >&2
+      echo "upgrade: error: no input — pipe a squashfs image into this command" >&2
       echo "  nix build .#rootfsPartition" >&2
-      echo "  ssh root@luckfox upgrade < result/rootfs.ext4" >&2
+      echo "  ssh root@device upgrade < result/rootfs.squashfs" >&2
       exit 1
     fi
 
-    # Resolve slot partitions by filesystem label — works on any device name.
-    # findfs is a busybox applet that resolves LABEL= and UUID= to device paths.
-    SLOT_A=$(findfs LABEL="${cfg.slotLabelA}" 2>/dev/null)
-    SLOT_B=$(findfs LABEL="${cfg.slotLabelB}" 2>/dev/null)
+    # Locate the disk via the persist partition's ext4 label.
+    # Squashfs slot partitions have no filesystem label; the persist partition does.
+    PERSIST=$(findfs LABEL="${cfg.persistLabel}" 2>/dev/null)
 
-    if [ -z "$SLOT_A" ]; then
-      echo "upgrade: error: no partition with LABEL=${cfg.slotLabelA}" >&2
+    if [ -z "$PERSIST" ]; then
+      echo "upgrade: error: no partition with LABEL=${cfg.persistLabel}" >&2
       exit 1
     fi
 
-    # Derive the whole-disk device from the slot A partition path.
-    DISK=$(echo "$SLOT_A" | sed -E 's/p?[0-9]+$//')
+    # Derive the whole-disk device from the persist partition path.
+    DISK=$(echo "$PERSIST" | sed -E 's/p?[0-9]+$//')
+
+    # Slot partitions by number: p2 = slot A, p3 = slot B.
+    case "$DISK" in
+      *mmcblk* | *nvme*) SLOT_A="''${DISK}p2"; SLOT_B="''${DISK}p3" ;;
+      *)                 SLOT_A="''${DISK}2";  SLOT_B="''${DISK}3"  ;;
+    esac
 
     CURRENT=$(dd if="$DISK" bs=1 skip="$OFFSET" count=1 2>/dev/null)
     case "$CURRENT" in
@@ -215,13 +276,8 @@ let
       *) NEXT=b; TARGET=$SLOT_B ;;
     esac
 
-    if [ -z "$TARGET" ]; then
-      echo "upgrade: error: no partition with LABEL=${cfg.slotLabelB} for target slot" >&2
-      exit 1
-    fi
-
     echo "upgrade: current=$CURRENT  next=$NEXT  target=$TARGET"
-    echo "upgrade: streaming rootfs from stdin — do not interrupt..."
+    echo "upgrade: streaming squashfs from stdin — do not interrupt..."
 
     dd of="$TARGET" bs=4M
     sync
@@ -235,7 +291,7 @@ let
     reboot
   '';
 
-  # ── /bin/slot ─────────────────────────────────────────────────────────────
+  # ── /bin/slot ────────────────────────────────────────────────────────────
   slotScript = pkgs.writeScript "slot" ''
     #!/bin/sh
     # slot          — show active and standby slots
@@ -243,18 +299,20 @@ let
     # slot b        — set slot B active on next boot (no reboot)
     OFFSET="${toString cfg.slotOffset}"
 
-    # Resolve slot partitions by filesystem label — works on any device name.
-    # findfs is a busybox applet that resolves LABEL= and UUID= to device paths.
-    SLOT_A=$(findfs LABEL="${cfg.slotLabelA}" 2>/dev/null)
-    SLOT_B=$(findfs LABEL="${cfg.slotLabelB}" 2>/dev/null)
+    # Locate the disk via the persist partition's ext4 label.
+    PERSIST=$(findfs LABEL="${cfg.persistLabel}" 2>/dev/null)
 
-    if [ -z "$SLOT_A" ]; then
-      echo "slot: error: no partition with LABEL=${cfg.slotLabelA}" >&2
+    if [ -z "$PERSIST" ]; then
+      echo "slot: error: no partition with LABEL=${cfg.persistLabel}" >&2
       exit 1
     fi
 
-    # Derive the whole-disk device from the slot A partition path.
-    DISK=$(echo "$SLOT_A" | sed -E 's/p?[0-9]+$//')
+    DISK=$(echo "$PERSIST" | sed -E 's/p?[0-9]+$//')
+
+    case "$DISK" in
+      *mmcblk* | *nvme*) SLOT_A="''${DISK}p2"; SLOT_B="''${DISK}p3" ;;
+      *)                 SLOT_A="''${DISK}2";  SLOT_B="''${DISK}3"  ;;
+    esac
 
     case "$1" in
       a|b)
@@ -288,25 +346,20 @@ let
     esac
   '';
 
-  # ── Standalone rootfs ext4 image (for streaming via `upgrade`) ───────────
-  # Built to match the size of one slot in the A/B SD image.  The upgrade
-  # script streams this from stdin with  ssh root@device upgrade < rootfs.ext4
-  rootfsPartitionImage = pkgs.runCommand "rootfs-partition" {
-    nativeBuildInputs = with pkgs.buildPackages; [ e2fsprogs ];
+  # ── Standalone rootfs squashfs image (for streaming via `upgrade`) ────────
+  # Written byte-for-byte to a raw slot partition — no filesystem wrapper.
+  # -mkfs-time 0 -all-time 0 suppress embedded timestamps for reproducibility.
+  rootfsSquashfsImage = pkgs.runCommand "rootfs-squashfs" {
+    nativeBuildInputs = with pkgs.buildPackages; [ squashfsTools ];
   } ''
     mkdir -p $out
-    # Match the slot size from sdimage.nix exactly:
-    #   total image − 2 MiB gap (partStartSector=4096 × 512 B), split in half.
-    # The upgrade script streams this image with `dd of="$TARGET"`, so it must
-    # be ≤ the slot partition size on the device.
-    IMAGE_BYTES=$(( ${toString config.system.imageSize} * 1024 * 1024 ))
-    PART_BYTES=$(( (IMAGE_BYTES - 4096 * 512) / 2 ))
-    truncate -s $PART_BYTES $out/rootfs.ext4
-    mkfs.ext4 \
-      -d ${config.system.build.rootfs} \
-      -L rootfs \
-      -E lazy_itable_init=0,lazy_journal_init=0 \
-      $out/rootfs.ext4
+    mksquashfs ${config.system.build.rootfs} $out/rootfs.squashfs \
+      -comp ${cfg.squashfsCompression} \
+      -noappend \
+      -mkfs-time 0 \
+      -all-time 0 \
+      -no-progress
+    echo "squashfs size: $(du -sh $out/rootfs.squashfs | cut -f1)"
   '';
 
 in
@@ -317,7 +370,7 @@ in
       # Always set these — readOnly options with no default must have exactly
       # one definition. null when A/B is disabled, derivation when enabled.
       system.build.slotSelectInitramfs = if cfg.enable then slotSelectInitramfs else null;
-      system.build.rootfsPartition     = if cfg.enable then rootfsPartitionImage else null;
+      system.build.rootfsPartition     = if cfg.enable then rootfsSquashfsImage else null;
     }
     (lib.mkIf cfg.enable {
       # Install upgrade and slot scripts into the rootfs only when A/B is on.

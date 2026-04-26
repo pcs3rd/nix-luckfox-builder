@@ -1,5 +1,4 @@
-# Flashable SD image for Luckfox Pico Mini B (Rockchip RV1103) and
-# Pine64 Ox64 (BL808 RISC-V).
+# Flashable SD image for Luckfox Pico Mini B (Rockchip RV1103).
 #
 # Produces a raw disk image that can be written directly to an SD card:
 #
@@ -12,22 +11,25 @@
 #   Offset 0x800 00 (sec 16384) : U-Boot proper              ← if provided
 #   Offset 0x100 000  (2 MiB)  : ext4 rootfs (partition 1)
 #
-# ── A/B dual-partition layout (A/B enabled) ──────────────────────────────────
+# ── A/B layout with squashfs + overlayfs (A/B enabled) ───────────────────────
 #
-#   Offset 0x000 (sector     0) : MBR + partition table
-#   Offset 0x200 (byte      512): slot indicator byte ('a')  ← written here
+#   Offset 0x000 (sector     0) : MBR + partition table (4 entries)
+#   Offset 0x200 (byte      512): slot indicator byte ('a')
 #   Offset 0x020 (sector    64) : Rockchip SPL / idbloader  ← if provided
 #   Offset 0x800 00 (sec 16384) : U-Boot proper              ← if provided
-#   Offset 0x100 000  (2 MiB)  : ext4 rootfs A (partition 1) ← kernel + boot.scr + rootfs
-#   Following p1               : ext4 rootfs B (partition 2) ← rootfs only
 #
-#   boot.scr (U-Boot distro boot, primary path): reads raw sector 1, sets
-#   root=LABEL=rootfs-{a,b}, loads kernel — device-agnostic (mmc or virtio).
-#   extlinux.conf (fallback): references the slot-select initramfs, which
-#   mounts the active partition and switch_root's into it.
+#   Partition 1  (ext4,     label: "boot")    — kernel + initramfs + boot.scr
+#   Partition 2  (squashfs, no label)         — slot A rootfs  (read-only)
+#   Partition 3  (squashfs, no label)         — slot B rootfs  (read-only)
+#   Partition 4  (ext4,     label: "persist") — overlayfs upper/work dirs
 #
-# macOS-compatible: uses mkfs.ext4 -d to populate the filesystem from a
-# directory — no losetup or mount required.
+#   boot.scr (U-Boot distro boot, primary path): loads kernel + initramfs from p1,
+#   sets bootargs without root= — the initramfs reads the slot indicator byte,
+#   mounts the active squashfs slot, overlays the persist partition, and
+#   switch_root's into the result.
+#
+# macOS-compatible: uses mkfs.ext4 -d to populate filesystems from a directory
+# tree — no losetup or mount required.
 
 { pkgs, config, lib, ... }:
 
@@ -36,7 +38,7 @@ let
   # Gate bootloader blobs on enable so QEMU builds (boot.uboot.enable = false)
   # do not write SPL/U-Boot into the disk image.  Both offsets (sector 64 and
   # sector 16384) fall inside partition 1 when it starts at sector 4096, so
-  # writing them for a QEMU image would corrupt the ext4 filesystem.
+  # writing them for a QEMU image would corrupt the filesystem.
   spl    = if config.boot.uboot.enable then config.boot.uboot.spl    else null;
   uboot  = if config.boot.uboot.enable then config.boot.uboot.package else null;
   abCfg  = config.system.abRootfs;
@@ -44,32 +46,25 @@ let
   # Sector at which partition 1 starts (2 MiB = 4096 × 512 B sectors).
   partStartSector = 4096;
 
-  # ── U-Boot A/B slot-select boot script ───────────────────────────────────
-  # Compiled with mkimage and placed at /boot.scr in partition 1.
-  # U-Boot's distro_bootcmd finds it before extlinux.conf and runs it directly.
+  # ── U-Boot boot script (A/B mode) ────────────────────────────────────────
+  # Loaded by U-Boot's distro_bootcmd from partition 1 (the ext4 boot partition).
+  # Loads the kernel and initramfs; the initramfs handles slot detection and
+  # overlay setup — boot.scr no longer needs to read the slot indicator byte.
   #
   # Uses distro_bootcmd environment variables for portability:
-  #   ${devtype}          — "mmc"    (real hardware)  or "virtio" (QEMU)
+  #   ${devtype}          — "mmc" (real hardware) or "virtio" (QEMU)
   #   ${devnum}           — device index (0 for the first device)
   #   ${distro_bootpart}  — partition where boot.scr was found (1)
-  #
-  # The slot indicator byte at raw sector 1 ('a' or 'b') is read directly
-  # by U-Boot before the kernel starts — no initramfs needed for slot select.
+  #   ${filesize}         — updated by each ext4load; use after the last load
   abBootScript = pkgs.writeText "ab-boot-script.txt" ''
-    ''${devtype} read ''${loadaddr} 1 1
-    if itest.b *''${loadaddr} == 0x62; then
-        echo "A/B: slot B active  (${abCfg.slotLabelB})"
-        setenv rootlabel ${abCfg.slotLabelB}
-    else
-        echo "A/B: slot A active  (${abCfg.slotLabelA})"
-        setenv rootlabel ${abCfg.slotLabelA}
-    fi
-    setenv bootargs "${config.boot.cmdline} root=LABEL=''${rootlabel} rootwait rw"
-    echo "bootargs: ''${bootargs}"
+    echo "A/B squashfs boot: loading kernel + initramfs from partition 1"
+    setenv bootargs "${config.boot.cmdline}"
     ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r} /zImage
     ${lib.optionalString (config.device.dtb != null) ''
       ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r} /${config.device.name}.dtb
-    ''}bootz ''${kernel_addr_r} - ''${fdt_addr_r}
+    ''}ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
+    echo "bootargs: ''${bootargs}"
+    bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
   '';
 in
 
@@ -79,6 +74,8 @@ in
       e2fsprogs   # mkfs.ext4 with -d flag
       python3     # MBR partition-table writer
       ubootTools  # mkimage — compiles the A/B boot script
+    ] ++ lib.optionals abCfg.enable [
+      squashfsTools  # mksquashfs for slot images (via rootfsPartition)
     ];
   } ''
     mkdir -p $out
@@ -86,7 +83,6 @@ in
     SECTOR=${toString partStartSector}
     IMAGE_BYTES=$(( IMAGE_MB * 1024 * 1024 ))
     TOTAL_SECTORS=$(( IMAGE_BYTES / 512 ))
-    AVAILABLE_SECTORS=$(( TOTAL_SECTORS - SECTOR ))
 
     echo "Building flashable SD image (''${IMAGE_MB} MiB)..."
 
@@ -94,23 +90,44 @@ in
     dd if=/dev/zero of=$out/sd-flashable.img bs=1M count=$IMAGE_MB 2>/dev/null
 
     ${if abCfg.enable then ''
-    # ── A/B: two equal-size rootfs partitions ───────────────────────────────
-    PART_SIZE_SECTORS=$(( AVAILABLE_SECTORS / 2 ))
-    PART_SIZE_BYTES=$(( PART_SIZE_SECTORS * 512 ))
-    PART2_START=$(( SECTOR + PART_SIZE_SECTORS ))
+    # ── A/B: squashfs slots + separate boot and persist partitions ───────────
+    #
+    # Fixed partition layout (sizes in sectors, 1 sector = 512 bytes):
+    #   p1 = boot (ext4):    kernel + initramfs + boot.scr
+    #   p2 = slot A (squashfs, raw)
+    #   p3 = slot B (squashfs, raw)
+    #   p4 = persist (ext4): overlayfs upper/work dirs
 
-    echo "A/B mode: each partition = ''${PART_SIZE_SECTORS} sectors ($(( PART_SIZE_BYTES / 1024 / 1024 )) MiB)"
+    BOOT_SIZE_SECTORS=$(( ${toString abCfg.bootPartSize} * 2048 ))
+    PERSIST_SIZE_SECTORS=$(( ${toString abCfg.persistSize} * 2048 ))
+    AVAILABLE_SECTORS=$(( TOTAL_SECTORS - SECTOR ))
+    SLOT_SIZE_SECTORS=$(( (AVAILABLE_SECTORS - BOOT_SIZE_SECTORS - PERSIST_SIZE_SECTORS) / 2 ))
 
-    # Write slot indicator byte 'a' at sector 1 (byte offset 512)
+    BOOT_START=$SECTOR
+    SLOT_A_START=$(( BOOT_START  + BOOT_SIZE_SECTORS   ))
+    SLOT_B_START=$(( SLOT_A_START + SLOT_SIZE_SECTORS   ))
+    PERSIST_START=$(( SLOT_B_START + SLOT_SIZE_SECTORS  ))
+
+    echo "boot:    sectors $BOOT_START–$(( SLOT_A_START - 1 ))  ($(( BOOT_SIZE_SECTORS / 2048 )) MiB)"
+    echo "slot A:  sectors $SLOT_A_START–$(( SLOT_B_START - 1 ))  ($(( SLOT_SIZE_SECTORS / 2048 )) MiB)"
+    echo "slot B:  sectors $SLOT_B_START–$(( PERSIST_START - 1 ))  ($(( SLOT_SIZE_SECTORS / 2048 )) MiB)"
+    echo "persist: sectors $PERSIST_START–$(( PERSIST_START + PERSIST_SIZE_SECTORS - 1 ))  ($(( PERSIST_SIZE_SECTORS / 2048 )) MiB)"
+
+    # Write slot indicator byte 'a' at the reserved raw disk offset
     printf 'a' | dd of=$out/sd-flashable.img bs=1 seek=${toString abCfg.slotOffset} conv=notrunc 2>/dev/null
 
-    # MBR with two partition entries
-    python3 - $SECTOR $PART_SIZE_SECTORS $PART2_START << 'PYEOF'
+    # MBR with four partition entries
+    python3 - $BOOT_START $BOOT_SIZE_SECTORS $SLOT_SIZE_SECTORS $PERSIST_SIZE_SECTORS << 'PYEOF'
 import struct, sys
 
-start1 = int(sys.argv[1])
-size   = int(sys.argv[2])
-start2 = int(sys.argv[3])
+boot_start   = int(sys.argv[1])
+boot_size    = int(sys.argv[2])
+slot_size    = int(sys.argv[3])
+persist_size = int(sys.argv[4])
+
+slot_a_start  = boot_start + boot_size
+slot_b_start  = slot_a_start + slot_size
+persist_start = slot_b_start + slot_size
 
 def chs(lba):
     c = min(lba // (255 * 63), 1023)
@@ -118,20 +135,21 @@ def chs(lba):
     s = (lba %  63) + 1
     return bytes([h & 0xFF, (s & 0x3F) | ((c >> 2) & 0xC0), c & 0xFF])
 
-def part_entry(start, size):
+def part_entry(start, size, ptype=0x83):
     return struct.pack('<B3sB3sII',
         0x00,
         chs(start),
-        0x83,  # Linux filesystem
+        ptype,
         chs(start + size - 1),
         start,
         size,
     )
 
 mbr = (b'\x00' * 446
-       + part_entry(start1, size)
-       + part_entry(start2, size)
-       + b'\x00' * 32
+       + part_entry(boot_start,   boot_size)    # p1: ext4 boot
+       + part_entry(slot_a_start, slot_size)    # p2: squashfs slot A
+       + part_entry(slot_b_start, slot_size)    # p3: squashfs slot B
+       + part_entry(persist_start, persist_size) # p4: ext4 persist
        + b'\x55\xAA')
 
 import os
@@ -140,8 +158,81 @@ os.write(fd, mbr)
 os.close(fd)
 PYEOF
 
+    dd if=mbr.bin of=$out/sd-flashable.img bs=1 conv=notrunc 2>/dev/null
+
+    # ── Build boot partition (p1): kernel + initramfs + boot.scr ────────────
+    mkdir -p boot-staging/extlinux
+
+    ${lib.optionalString (config.device.kernel != null) ''
+      cp ${config.device.kernel} boot-staging/zImage
+    ''}
+    ${lib.optionalString (config.device.dtb != null) ''
+      cp ${config.device.dtb} boot-staging/${config.device.name}.dtb
+    ''}
+
+    # Slot-select initramfs handles squashfs mount + overlay setup.
+    cp ${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz \
+       boot-staging/initramfs-slotselect.cpio.gz
+
+    # Compiled U-Boot boot script (primary boot path).
+    mkimage -A arm -O linux -T script -C none -a 0 -e 0 \
+      -n "A/B squashfs boot" -d ${abBootScript} boot-staging/boot.scr
+
+    # extlinux.conf fallback (used if boot.scr fails or is not found first).
+    cat > boot-staging/extlinux/extlinux.conf << EXTEOF
+LABEL linux
+  KERNEL /zImage
+${lib.optionalString (config.device.dtb != null)
+  "  FDT /${config.device.name}.dtb"}
+  INITRD /initramfs-slotselect.cpio.gz
+  APPEND ${config.boot.cmdline}
+EXTEOF
+
+    BOOT_SIZE_BYTES=$(( BOOT_SIZE_SECTORS * 512 ))
+    truncate -s $BOOT_SIZE_BYTES boot.img
+    mkfs.ext4 \
+      -d boot-staging \
+      -L ${abCfg.bootPartLabel} \
+      -E lazy_itable_init=0,lazy_journal_init=0 \
+      boot.img
+
+    dd if=boot.img of=$out/sd-flashable.img bs=512 seek=$BOOT_START conv=notrunc 2>/dev/null
+    echo "boot partition written ($(du -sh boot.img | cut -f1))"
+
+    # ── Write squashfs slot A (p2) and slot B (p3) ───────────────────────────
+    # The squashfs image is written directly to the raw partition.
+    # mount -t squashfs /dev/vda2 /mnt works because squashfs is a block-level
+    # filesystem — no loop device or filesystem label needed.
+    SQUASHFS=${config.system.build.rootfsPartition}/rootfs.squashfs
+    SQUASHFS_BYTES=$(wc -c < "$SQUASHFS")
+    SLOT_SIZE_BYTES=$(( SLOT_SIZE_SECTORS * 512 ))
+
+    if [ "$SQUASHFS_BYTES" -gt "$SLOT_SIZE_BYTES" ]; then
+      echo "ERROR: squashfs ($SQUASHFS_BYTES bytes) exceeds slot size ($SLOT_SIZE_BYTES bytes)" >&2
+      echo "Increase system.imageSize in your configuration." >&2
+      exit 1
+    fi
+
+    echo "slot A squashfs: $(du -sh $SQUASHFS | cut -f1)  →  partition 2 ($(( SLOT_SIZE_BYTES / 1024 / 1024 )) MiB)"
+    dd if=$SQUASHFS of=$out/sd-flashable.img bs=512 seek=$SLOT_A_START conv=notrunc 2>/dev/null
+
+    echo "slot B squashfs: copying same image → partition 3"
+    dd if=$SQUASHFS of=$out/sd-flashable.img bs=512 seek=$SLOT_B_START conv=notrunc 2>/dev/null
+
+    # ── Format persist partition (p4) as ext4 ────────────────────────────────
+    PERSIST_SIZE_BYTES=$(( PERSIST_SIZE_SECTORS * 512 ))
+    truncate -s $PERSIST_SIZE_BYTES persist.img
+    mkfs.ext4 \
+      -L ${abCfg.persistLabel} \
+      -E lazy_itable_init=0,lazy_journal_init=0 \
+      persist.img
+
+    dd if=persist.img of=$out/sd-flashable.img bs=512 seek=$PERSIST_START conv=notrunc 2>/dev/null
+    echo "persist partition written ($(( PERSIST_SIZE_BYTES / 1024 / 1024 )) MiB ext4, label: ${abCfg.persistLabel})"
+
     '' else ''
     # ── Single partition ─────────────────────────────────────────────────────
+    AVAILABLE_SECTORS=$(( TOTAL_SECTORS - SECTOR ))
     PART_SIZE_SECTORS=$AVAILABLE_SECTORS
     PART_SIZE_BYTES=$(( PART_SIZE_SECTORS * 512 ))
 
@@ -174,7 +265,6 @@ os.write(fd, mbr)
 os.close(fd)
 PYEOF
 
-    ''}
     dd if=mbr.bin of=$out/sd-flashable.img bs=1 conv=notrunc 2>/dev/null
 
     # ── Stage rootfs + kernel + DTB + extlinux.conf ─────────────────────────
@@ -184,22 +274,8 @@ PYEOF
     ${lib.optionalString (config.device.kernel != null) ''
       cp ${config.device.kernel} staging/zImage
     ''}
-
     ${lib.optionalString (config.device.dtb != null) ''
       cp ${config.device.dtb} staging/${config.device.name}.dtb
-    ''}
-
-    ${lib.optionalString abCfg.enable ''
-      # Copy slot-select initramfs (extlinux.conf fallback path).
-      cp ${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz \
-         staging/initramfs-slotselect.cpio.gz
-
-      # Compile U-Boot boot script (primary A/B boot path).
-      # U-Boot distro_bootcmd finds boot.scr before extlinux.conf, reads the
-      # raw slot indicator byte from sector 1, and boots the active partition
-      # without needing an initramfs — works on both MMC and virtio (QEMU).
-      mkimage -A arm -O linux -T script -C none -a 0 -e 0 \
-        -n "A/B slot select" -d ${abBootScript} staging/boot.scr
     ''}
 
     mkdir -p staging/extlinux
@@ -208,64 +284,44 @@ LABEL linux
   KERNEL /zImage
 ${lib.optionalString (config.device.dtb != null)
   "  FDT /${config.device.name}.dtb"}
-${lib.optionalString abCfg.enable
-  "  INITRD /initramfs-slotselect.cpio.gz"}
   APPEND ${config.boot.cmdline}
 EXTEOF
 
-    # ── Build ext4 partition 1 image from staging directory ─────────────────
-    # mkfs.ext4 -d populates the filesystem in-place from a directory tree,
-    # without needing to mount anything — safe on macOS and in the Nix sandbox.
-    #
+    # mkfs.ext4 -d populates the filesystem without needing to mount anything —
+    # safe on macOS and in the Nix sandbox.
     # Use truncate to create a sparse file of exactly PART_SIZE_BYTES.
-    # "dd bs=1 count=0 seek=N" is NOT equivalent — on Linux, GNU dd with
-    # count=0 transfers nothing and does NOT extend the output file to the
-    # seek position, leaving a 0-byte file.  truncate is unambiguous.
     truncate -s $PART_SIZE_BYTES part1.img
     mkfs.ext4 \
       -d staging \
-      -L rootfs-a \
+      -L rootfs \
       -E lazy_itable_init=0,lazy_journal_init=0 \
       part1.img
 
-    # ── Embed partition 1 into disk image ────────────────────────────────────
     dd if=part1.img of=$out/sd-flashable.img bs=512 seek=$SECTOR conv=notrunc 2>/dev/null
 
-    ${if abCfg.enable then ''
-    # ── Build ext4 partition 2 (slot B — rootfs only, no kernel) ────────────
-    # Slot B only needs the rootfs; the bootloader always loads the kernel
-    # from slot A (partition 1).  Staged without kernel/DTB/extlinux/initramfs.
-    cp -r ${rootfs} staging-b
-    chmod -R u+w staging-b
-
-    truncate -s $PART_SIZE_BYTES part2.img
-    mkfs.ext4 \
-      -d staging-b \
-      -L rootfs-b \
-      -E lazy_itable_init=0,lazy_journal_init=0 \
-      part2.img
-
-    dd if=part2.img of=$out/sd-flashable.img bs=512 seek=$PART2_START conv=notrunc 2>/dev/null
-    '' else ""}
+    ''}
 
     # ── Write Rockchip bootloader blobs ─────────────────────────────────────
-    # SPL / idbloader at sector 64 (Rockchip boot ROM requirement)
+    # SPL / idbloader at sector 64 (Rockchip boot ROM requirement).
+    # Sector 64 = 32 KiB, well before partition 1 which starts at sector 4096 = 2 MiB.
     ${lib.optionalString (spl != null) ''
       echo "Writing SPL at sector 64..."
       dd if=${spl} of=$out/sd-flashable.img bs=512 seek=64 conv=notrunc 2>/dev/null
     ''}
 
-    # U-Boot proper at sector 16384 (8 MiB)
+    # U-Boot proper at sector 16384 (8 MiB).
+    # NOTE: sector 16384 (8 MiB) is INSIDE partition 1 when it starts at sector 4096
+    # and is larger than 6 MiB.  For QEMU builds boot.uboot.enable must be false.
     ${lib.optionalString (uboot != null) ''
       echo "Writing U-Boot at sector 16384..."
       dd if=${uboot} of=$out/sd-flashable.img bs=512 seek=16384 conv=notrunc 2>/dev/null
     ''}
 
     echo "SD image ready: $out/sd-flashable.img"
-    ${if abCfg.enable then ''
-    echo "A/B layout: slot A = partition 1, slot B = partition 2"
-    echo "Slot indicator byte 'a' written at byte offset ${toString abCfg.slotOffset}"
-    '' else ""}
     echo "Flash with: dd if=$out/sd-flashable.img of=/dev/sdX bs=4M status=progress"
+    ${lib.optionalString abCfg.enable ''
+    echo "A/B layout: boot=p1(ext4)  slot-A=p2(squashfs)  slot-B=p3(squashfs)  persist=p4(ext4)"
+    echo "Slot indicator byte 'a' written at byte offset ${toString abCfg.slotOffset}"
+    ''}
   '';
 }

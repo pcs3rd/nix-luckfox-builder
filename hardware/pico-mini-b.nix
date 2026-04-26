@@ -18,13 +18,12 @@
   };
 
   # ── A/B rootfs slot configuration ────────────────────────────────────────
-  # Partition 1 holds the kernel, initramfs, and rootfs A.
-  # Partition 2 holds rootfs B (no kernel — bootloader always reads from p1).
+  # Enables squashfs + overlayfs A/B upgrades with 4 partitions:
+  #   p1 = ext4 "boot"    (kernel + initramfs + boot.scr)
+  #   p2 = squashfs slot A  (read-only rootfs)
+  #   p3 = squashfs slot B  (read-only rootfs)
+  #   p4 = ext4 "persist"  (overlayfs upper/work dirs)
   # Enable in your configuration.nix with:  system.abRootfs.enable = true;
-  # The SD image builder creates a two-partition image automatically.
-  # A/B slot partitions are found at runtime by filesystem label ("rootfs-a",
-  # "rootfs-b") — no device path needed here.  Enable with:
-  #   system.abRootfs.enable = true;
   system.abRootfs.slotOffset = 512;   # byte 512 = sector 1, between MBR and SPL
 
   # ── USB OTG port (RV1103 DWC2 controller at 0xfcd00000) ─────────────────

@@ -8,8 +8,19 @@
 #
 #   Sector 0    : MBR + partition table
 #   Byte 512    : slot indicator byte ('a' or 'b')   ← managed by ab-rootfs.nix
-#   Sector 4096 : ext4  slot A  (label: rootfs-a) — kernel + boot.scr + rootfs
-#   Following A : ext4  slot B  (label: rootfs-b) — rootfs only
+#   Sector 4096 : p1 ext4 "boot"    — kernel + initramfs + boot.scr
+#   After p1    : p2 squashfs        — slot A rootfs  (read-only)
+#   After p2    : p3 squashfs        — slot B rootfs  (read-only)
+#   After p3    : p4 ext4 "persist"  — overlayfs upper/work dirs
+#
+# ── Boot path ─────────────────────────────────────────────────────────────────
+#
+#   1. QEMU starts U-Boot via -bios ${ubootQemuArm}/u-boot.bin.
+#   2. U-Boot distro_bootcmd finds boot.scr in virtio partition 1.
+#   3. boot.scr loads kernel + initramfs from p1.
+#   4. The slot-select initramfs reads the raw slot indicator byte.
+#   5. It mounts the active squashfs (p2 or p3) and layers the persist (p4)
+#      via overlayfs, then exec switch_root into the overlay.
 #
 # ── Usage ─────────────────────────────────────────────────────────────────────
 #
@@ -17,23 +28,11 @@
 #   ssh root@localhost -p <port> slot       # inspect active slot (A or B)
 #
 #   nix build .#qemu-ab-rootfs
-#   ssh root@localhost -p <port> upgrade < result/rootfs.ext4
+#   ssh root@localhost -p <port> upgrade < result/rootfs.squashfs
 #   # device reboots into the new slot automatically
 #
 # The QEMU disk is backed by a QCOW2 overlay so slot changes and rootfs
 # upgrades persist across QEMU runs.  Pass --reset to start fresh from slot A.
-#
-# ── How the A/B boot path works ──────────────────────────────────────────────
-#
-#   1. QEMU starts U-Boot via -bios ${ubootQemuArm}/u-boot.bin.
-#   2. U-Boot distro_bootcmd finds /boot.scr in virtio partition 1.
-#   3. boot.scr reads sector 1 (the raw slot indicator byte) via
-#      "${devtype} read ${loadaddr} 1 1".
-#   4. If byte == 'b': setenv rootlabel rootfs-b; else: setenv rootlabel rootfs-a.
-#   5. setenv bootargs "… root=LABEL=${rootlabel} rootwait rw"
-#   6. ext4load loads /zImage from partition 1.
-#   7. bootz starts the kernel; kernel finds the active partition by label.
-#   8. /sbin/init starts in the real rootfs — no initramfs involved.
 
 { lib, ... }:
 
@@ -45,7 +44,7 @@
 
   networking.hostname = lib.mkForce "luckfox-qemu-ab";
 
-  # boot.scr appends root=LABEL=… rootwait rw at runtime; no root= here.
+  # boot.scr sets bootargs without root= — the initramfs handles root mounting.
   boot.cmdline = lib.mkForce "console=ttyAMA0 init=/sbin/init panic=1";
 
   # U-Boot is supplied via -bios, not embedded in the disk image.
@@ -55,10 +54,10 @@
   # QEMU has ample RAM; zram is unnecessary.
   system.zram.enable = lib.mkForce false;
 
-  # A/B — partitions found at runtime by ext4 label (rootfs-a / rootfs-b).
-  # Works for both /dev/vda* (QEMU virtio) and /dev/mmcblk0p* (real hardware).
+  # A/B with squashfs + overlayfs.
+  # Slots are found by partition number (p2/p3); persist by ext4 label (p4).
   system.abRootfs.enable = true;
 
-  # 512 MiB total → ~256 MiB per slot (sector 4096 onward, split in half).
-  system.imageSize = lib.mkDefault 512;
+  # 2048 MiB total → p1=64 MiB boot, p2/p3=~863 MiB each, p4=256 MiB persist.
+  system.imageSize = lib.mkDefault 2048;
 }

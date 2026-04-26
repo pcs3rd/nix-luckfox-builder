@@ -303,29 +303,33 @@ RUNEOF
       # ── QEMU A/B disk image ─────────────────────────────────────────────────
       #
       # The unified SD image built by sdimage.nix — same builder as real hardware.
-      # Contains: MBR, slot indicator 'a' at byte 512, two equal ext4 partitions.
-      # Partition 1: rootfs A + qemuKernel/zImage + boot.scr + extlinux.conf
-      # Partition 2: rootfs B
+      # 4-partition layout:
+      #   p1: ext4 "boot"    — kernel + initramfs + boot.scr
+      #   p2: squashfs       — slot A rootfs (read-only)
+      #   p3: squashfs       — slot B rootfs (read-only)
+      #   p4: ext4 "persist" — overlayfs upper/work dirs
       #
-      # U-Boot (provided via -bios) loads boot.scr, reads the slot indicator byte,
-      # and boots the active partition with root=LABEL=… — no initramfs needed.
+      # U-Boot (via -bios) loads boot.scr from p1, which loads kernel + initramfs.
+      # The initramfs reads the slot indicator byte, mounts the active squashfs slot,
+      # and sets up overlayfs on the persist partition before switch_root.
       qemu-ab-disk = picoMiniB-qemu-ab.config.system.build.sdImage;
 
-      # Standalone ext4 image for the upgrade workflow — same derivation as the
+      # Standalone squashfs image for the upgrade workflow — same derivation as the
       # real-hardware rootfsPartition so QEMU tests validate the production image.
       #   nix build .#qemu-ab-rootfs
-      #   ssh root@localhost -p <port> upgrade < result/rootfs.ext4
+      #   ssh root@localhost -p <port> upgrade < result/rootfs.squashfs
       qemu-ab-rootfs = picoMiniB-ab.config.system.build.rootfsPartition;
 
       # ── QEMU A/B launcher (U-Boot firmware) ─────────────────────────────────
       #
-      # U-Boot initializes, scans the virtio disk, finds boot.scr in partition 1,
-      # reads the raw slot indicator byte, and boots the kernel with root= pointing
-      # at the active slot partition.  No initramfs is involved — the kernel mounts
-      # /dev/vda1 or /dev/vda2 directly (virtio_blk is built into the kernel).
+      # U-Boot initializes, scans the virtio disk, finds boot.scr in partition 1
+      # (ext4 "boot"), and loads the kernel + slot-select initramfs.  The initramfs
+      # reads the raw slot indicator byte (sector 1), mounts the active squashfs
+      # slot (p2 or p3) via overlayfs on the persist partition (p4), then
+      # switch_root's into the overlay.
       #
-      # The same /bin/upgrade and /bin/slot scripts from the rootfs manage slot
-      # switching by writing to the raw disk byte, exactly as on real hardware.
+      # /bin/upgrade and /bin/slot in the rootfs manage slot switching by writing
+      # to the raw disk byte, exactly as on real hardware.
       qemu-ab = hostPkgs.writeShellApplication {
         name = "qemu-ab-luckfox";
         runtimeInputs = with hostPkgs; [ qemu python3 ];
@@ -358,7 +362,7 @@ RUNEOF
           echo ""
           echo "  Test A/B upgrade:"
           echo "    nix build .#qemu-ab-rootfs"
-          echo "    ssh root@localhost -p ''${SSH_PORT} upgrade < result/rootfs.ext4"
+          echo "    ssh root@localhost -p ''${SSH_PORT} upgrade < result/rootfs.squashfs"
           echo ""
           echo "  Slot changes and upgrades persist in: $OVERLAY"
           echo "  Run with --reset to wipe the overlay and start from slot A"
@@ -389,7 +393,7 @@ RUNEOF
         # A/B rootfs outputs (zero-downtime SSH upgrades)
         # Flash sdImage-ab to a card, then use rootfsPartition for subsequent upgrades:
         #   nix build .#sdImage-ab && dd if=result/sd-flashable.img of=/dev/sdX bs=4M
-        #   nix build .#rootfsPartition && ssh root@luckfox upgrade < result/rootfs.ext4
+        #   nix build .#rootfsPartition && ssh root@luckfox upgrade < result/rootfs.squashfs
         sdImage-ab            = picoMiniB-ab.config.system.build.sdImage;
         rootfsPartition       = picoMiniB-ab.config.system.build.rootfsPartition;
         slotSelectInitramfs   = picoMiniB-ab.config.system.build.slotSelectInitramfs;
@@ -407,10 +411,10 @@ RUNEOF
         qemu-vm-bundle    = qemu-vm-bundle;
         qemu-vm           = qemu-vm;
 
-        # A/B rootfs QEMU test — full slot-select boot path in a VM.
+        # A/B rootfs QEMU test — squashfs + overlayfs boot path in a VM.
         # nix run .#qemu-ab                     — launch the VM
         # nix build .#qemu-ab-disk              — the raw A/B disk image
-        # nix build .#qemu-ab-rootfs            — standalone ext4 for upgrade testing
+        # nix build .#qemu-ab-rootfs            — standalone squashfs for upgrade testing
         qemu-ab           = qemu-ab;
         qemu-ab-disk      = qemu-ab-disk;
         qemu-ab-rootfs    = qemu-ab-rootfs;

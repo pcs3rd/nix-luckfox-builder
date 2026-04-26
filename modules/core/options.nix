@@ -498,44 +498,89 @@ with lib;
 
     system.abRootfs = {
       enable = mkEnableOption ''
-        A/B rootfs for zero-downtime over-SSH upgrades.
+        A/B rootfs with squashfs + overlayfs for zero-downtime SSH upgrades.
 
-        Stores a single slot indicator byte at a raw disk offset (sector 1 by
-        default).  A tiny slot-select initramfs reads it at boot and
-        switch_root's into the matching partition — no bootloader changes needed.
+        Disk layout (4 partitions):
+          p1 — ext4 boot partition  (kernel, initramfs, boot.scr)
+          p2 — squashfs slot A rootfs  (read-only compressed image)
+          p3 — squashfs slot B rootfs  (read-only compressed image)
+          p4 — ext4 persist partition  (overlayfs upper/work dirs)
 
-        /bin/upgrade streams a new rootfs image from stdin to the inactive slot,
-        flips the slot byte, and reboots.  /bin/slot shows the current state.
+        A single slot indicator byte at a raw disk offset (sector 1 by default)
+        selects the active slot.  A tiny initramfs reads it at boot, mounts the
+        active squashfs slot, layers the persist partition on top via overlayfs,
+        and switch_root's into the overlay.
 
-        See modules/core/ab-rootfs.nix for the full design description.
+        /bin/upgrade streams a new squashfs image from stdin to the inactive slot,
+        flips the slot byte, and reboots.  /bin/slot shows or sets the active slot.
+
+        See modules/core/ab-rootfs.nix for the full design.
       '';
 
       slotOffset = mkOption {
         type        = types.int;
         default     = 512;
         description = ''
-          Byte offset on the disk at which the single slot indicator byte
+          Byte offset on the raw disk at which the single slot indicator byte
           ('a' or 'b') is stored.  The default 512 is the first byte of sector 1 —
           safely between the MBR (sector 0) and the first bootloader stage
-          (Rockchip SPL at sector 64).  The disk is located at runtime by
-          finding whichever block device contains the slotLabelA partition.
+          (Rockchip SPL at sector 64).
         '';
       };
 
-      slotLabelA = mkOption {
+      bootPartLabel = mkOption {
         type        = types.str;
-        default     = "rootfs-a";
+        default     = "boot";
         description = ''
-          Filesystem label of the slot A ext4 partition.  Used at runtime to
-          locate the partition via blkid — device-name-agnostic (works for
-          /dev/mmcblk0p1, /dev/vda1, /dev/sda1, etc.).
+          ext4 filesystem label for the boot partition (partition 1).
+          Contains the kernel image, initramfs, boot.scr, and extlinux.conf.
         '';
       };
 
-      slotLabelB = mkOption {
+      bootPartSize = mkOption {
+        type        = types.int;
+        default     = 64;
+        description = ''
+          Size of the boot partition (p1) in MiB.
+          64 MiB is generous for a kernel + initramfs + boot scripts.
+        '';
+      };
+
+      persistLabel = mkOption {
         type        = types.str;
-        default     = "rootfs-b";
-        description = "Filesystem label of the slot B ext4 partition.";
+        default     = "persist";
+        description = ''
+          ext4 filesystem label for the overlay persist partition (partition 4).
+          The initramfs mounts this partition and creates per-slot upper/work
+          directories for the overlayfs writable layer.  The label is also used
+          by /bin/upgrade and /bin/slot to locate the disk at runtime without
+          hardcoding device paths.
+        '';
+      };
+
+      persistSize = mkOption {
+        type        = types.int;
+        default     = 256;
+        description = ''
+          Size of the overlay persist partition (p4) in MiB.
+          This partition holds the overlayfs upper and work directories for
+          both slots (slot-a/upper, slot-a/work, slot-b/upper, slot-b/work).
+          Each slot's writable layer grows independently; upgrading to a new
+          slot starts with a fresh empty upper directory.
+        '';
+      };
+
+      squashfsCompression = mkOption {
+        type        = types.enum [ "lz4" "lzo" "gzip" "xz" "zstd" ];
+        default     = "lz4";
+        description = ''
+          Squashfs compression algorithm used when building rootfs slot images.
+            lz4  — fastest decompression; best boot-time performance (default).
+            lzo  — slightly better ratio than lz4, still very fast.
+            gzip — good ratio, moderate decompression speed.
+            zstd — best ratio with fast decompression; requires kernel ≥ 4.14.
+            xz   — highest ratio, slowest decompression; good for flash-constrained boards.
+        '';
       };
 
       extraKernelModules = mkOption {
@@ -544,9 +589,9 @@ with lib;
         description = ''
           List of kernel module (.ko) files or directories of .ko files to
           embed in the slot-select initramfs and insmod before probing for
-          block devices.  Use this to supply drivers (e.g. virtio_blk) that
-          are compiled as modules rather than built into the kernel.  Modules
-          are loaded in alphabetical order with three retries to satisfy
+          block devices.  Use this to supply drivers (e.g. virtio_blk, overlay,
+          squashfs) that are compiled as modules rather than built into the kernel.
+          Modules are loaded in alphabetical order with three retries to satisfy
           simple dependency chains.
         '';
       };
@@ -573,10 +618,10 @@ with lib;
         type        = types.nullOr types.path;
         readOnly    = true;
         description = ''
-          A standalone raw ext4 image of the rootfs, suitable for streaming
+          A standalone squashfs image of the rootfs, suitable for streaming
           to /bin/upgrade over SSH:
             nix build .#rootfsPartition
-            ssh root@device upgrade < result/rootfs.ext4
+            ssh root@device upgrade < result/rootfs.squashfs
           Null when system.abRootfs.enable = false.
         '';
       };
