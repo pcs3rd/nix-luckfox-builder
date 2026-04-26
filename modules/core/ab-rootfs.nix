@@ -197,9 +197,9 @@ let
     fi
 
     # Resolve slot partitions by filesystem label — works on any device name.
-    # busybox blkid uses -L <label>; util-linux uses -t LABEL=<label> -o device.
-    SLOT_A=$(blkid -L "${cfg.slotLabelA}" 2>/dev/null)
-    SLOT_B=$(blkid -L "${cfg.slotLabelB}" 2>/dev/null)
+    # findfs is a busybox applet that resolves LABEL= and UUID= to device paths.
+    SLOT_A=$(findfs LABEL="${cfg.slotLabelA}" 2>/dev/null)
+    SLOT_B=$(findfs LABEL="${cfg.slotLabelB}" 2>/dev/null)
 
     if [ -z "$SLOT_A" ]; then
       echo "upgrade: error: no partition with LABEL=${cfg.slotLabelA}" >&2
@@ -244,9 +244,9 @@ let
     OFFSET="${toString cfg.slotOffset}"
 
     # Resolve slot partitions by filesystem label — works on any device name.
-    # busybox blkid uses -L <label>; util-linux uses -t LABEL=<label> -o device.
-    SLOT_A=$(blkid -L "${cfg.slotLabelA}" 2>/dev/null)
-    SLOT_B=$(blkid -L "${cfg.slotLabelB}" 2>/dev/null)
+    # findfs is a busybox applet that resolves LABEL= and UUID= to device paths.
+    SLOT_A=$(findfs LABEL="${cfg.slotLabelA}" 2>/dev/null)
+    SLOT_B=$(findfs LABEL="${cfg.slotLabelB}" 2>/dev/null)
 
     if [ -z "$SLOT_A" ]; then
       echo "slot: error: no partition with LABEL=${cfg.slotLabelA}" >&2
