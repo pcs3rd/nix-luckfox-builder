@@ -444,8 +444,9 @@ let
     PERSIST_DEV=$(findfs LABEL="$PERSIST_LABEL" 2>/dev/null) \
       || die "no partition with LABEL=$PERSIST_LABEL"
 
-    PERSIST_MNT=$(mktemp -d /tmp/persist-XXXXXX) \
-      || die "mktemp failed"
+    PERSIST_MNT="/var/log/slot-share-$$"
+    mkdir -p "$PERSIST_MNT" \
+      || die "cannot create temp mount dir $PERSIST_MNT"
 
     mount -t ext4 "$PERSIST_DEV" "$PERSIST_MNT" \
       || die "cannot mount persist partition ($PERSIST_DEV)"
