@@ -153,16 +153,20 @@ let
     fi
     echo "slot-select: disk=$DISK  slot=$SLOT  root=$ROOT"
 
+    FALLBACK_MSG=""
+
     # ── Mount active squashfs slot ──────────────────────────────────────────
     # Squashfs can be mounted directly from a raw partition — no loop device
     # needed.  The kernel reads the squashfs superblock from the block device.
     if ! mount -t squashfs "$ROOT" /squash; then
-      echo "slot-select: WARNING — $ROOT failed, falling back to slot A" >&2
+      ATTEMPTED="$SLOT"
+      echo "slot-select: WARNING — slot $ATTEMPTED ($ROOT) failed; falling back to slot A" >&2
       mount -t squashfs "$SLOT_A" /squash || {
         echo "slot-select: FATAL — cannot mount any squashfs slot" >&2
         exec /bin/sh
       }
       SLOT=a
+      FALLBACK_MSG="Boot failure: slot $(echo "$ATTEMPTED" | tr a-z A-Z) ($ROOT) failed to mount; fell back to slot A."
     fi
 
     # ── Mount persist partition for overlayfs upper/work dirs ───────────────
@@ -185,10 +189,33 @@ let
         -o "lowerdir=/squash,upperdir=/persist/slot-$SLOT/upper,workdir=/persist/slot-$SLOT/work" \
         /newroot; then
       echo "slot-select: WARNING — overlay failed; binding squashfs read-only" >&2
+      if [ -z "$FALLBACK_MSG" ]; then
+        FALLBACK_MSG="Boot failure: overlayfs failed; rootfs is read-only (squashfs bind mount)."
+      else
+        FALLBACK_MSG="$FALLBACK_MSG  Also: overlayfs failed; rootfs is read-only."
+      fi
       mount --bind /squash /newroot || {
         echo "slot-select: FATAL — cannot set up root" >&2
         exec /bin/sh
       }
+    fi
+
+    # ── Record boot result in the new root so /bin/slot can report it ────────
+    # Both files are written into /newroot (the overlay), so they land in the
+    # persist upper layer and survive reboots.
+    #
+    #   /var/log/boot-slot      — the slot that actually booted this time ('a'/'b')
+    #   /var/log/boot-fallback  — human-readable message when a fallback occurred
+    #                             (absent when the intended slot booted cleanly)
+    #
+    # The fallback file is cleared automatically when a new slot is activated
+    # because each slot has its own fresh upper layer in the persist partition.
+    mkdir -p /newroot/var/log
+    printf '%s\n' "$SLOT" > /newroot/var/log/boot-slot
+    if [ -n "$FALLBACK_MSG" ]; then
+      printf '%s\n' "$FALLBACK_MSG" > /newroot/var/log/boot-fallback
+    else
+      rm -f /newroot/var/log/boot-fallback 2>/dev/null || true
     fi
 
     for mnt in proc sys dev; do
@@ -295,7 +322,7 @@ let
   # ── /bin/slot ────────────────────────────────────────────────────────────
   slotScript = pkgs.writeScript "slot" ''
     #!/bin/sh
-    # slot          — show active and standby slots
+    # slot          — show running and configured slots
     # slot a        — set slot A active on next boot (no reboot)
     # slot b        — set slot B active on next boot (no reboot)
     OFFSET="${toString cfg.slotOffset}"
@@ -320,7 +347,7 @@ let
         TARGET="$1"
         CURRENT=$(dd if="$DISK" bs=1 skip="$OFFSET" count=1 2>/dev/null)
         if [ "$CURRENT" = "$TARGET" ]; then
-          echo "slot: already on slot $(echo "$TARGET" | tr a-z A-Z) — nothing to do"
+          echo "slot: already configured for slot $(echo "$TARGET" | tr a-z A-Z) — nothing to do"
           exit 0
         fi
         printf '%s' "$TARGET" | dd of="$DISK" bs=1 seek="$OFFSET" conv=notrunc 2>/dev/null
@@ -328,17 +355,40 @@ let
         echo "slot: next boot will use slot $(echo "$TARGET" | tr a-z A-Z) — reboot to apply"
         ;;
       "")
-        CURRENT=$(dd if="$DISK" bs=1 skip="$OFFSET" count=1 2>/dev/null)
-        case "$CURRENT" in
-          b)
-            echo "active:  B  ($SLOT_B)"
-            echo "standby: A  ($SLOT_A)"
-            ;;
-          *)
-            echo "active:  A  ($SLOT_A)"
-            echo "standby: B  ($SLOT_B)"
-            ;;
-        esac
+        # Disk byte → what the bootloader is configured to try next boot.
+        CONFIGURED=$(dd if="$DISK" bs=1 skip="$OFFSET" count=1 2>/dev/null)
+        [ "$CONFIGURED" = "b" ] || CONFIGURED=a
+
+        # /var/log/boot-slot → what actually booted this session (written by initramfs).
+        RUNNING=$(cat /var/log/boot-slot 2>/dev/null | tr -d '[:space:]')
+        [ "$RUNNING" = "b" ] || RUNNING=a
+
+        # Derive the standby slot (the one not currently running).
+        if [ "$RUNNING" = "b" ]; then
+          STANDBY=a; RUNNING_PART=$SLOT_B; STANDBY_PART=$SLOT_A
+        else
+          STANDBY=b; RUNNING_PART=$SLOT_A; STANDBY_PART=$SLOT_B
+        fi
+
+        # ── Boot failure / fallback warning ──────────────────────────────────
+        FALLBACK=""
+        if [ -f /var/log/boot-fallback ]; then
+          FALLBACK=$(cat /var/log/boot-fallback)
+        fi
+
+        if [ -n "$FALLBACK" ]; then
+          echo "WARNING: $FALLBACK"
+          echo ""
+        fi
+
+        # ── Slot status ───────────────────────────────────────────────────────
+        echo "running:    $(echo "$RUNNING" | tr a-z A-Z)  ($RUNNING_PART)"
+        echo "standby:    $(echo "$STANDBY" | tr a-z A-Z)  ($STANDBY_PART)"
+
+        # Show if the disk byte disagrees with what actually booted.
+        if [ "$CONFIGURED" != "$RUNNING" ]; then
+          echo "next boot:  $(echo "$CONFIGURED" | tr a-z A-Z)  (still pointing at failed slot — run: slot $(echo "$RUNNING" | tr a-z A-Z))"
+        fi
         ;;
       *)
         echo "usage: slot [a|b]" >&2
