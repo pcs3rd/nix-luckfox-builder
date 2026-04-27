@@ -81,6 +81,46 @@ pkgs.stdenv.mkDerivation {
   enableParallelBuilding = true;
 
   configurePhase = ''
+    # ── Patch SDK build scripts for Nix cross-compiler compatibility ──────────
+    #
+    # The Luckfox/Rockchip SDK kernel ships a custom scripts/gcc-version.sh
+    # that delegates to scripts/gcc-wrapper.py — a Python shim designed for the
+    # SDK's bundled cross-toolchain (arm-rockchip820-linux-uclibcgnueabihf-gcc).
+    # When building with Nix's cross-compiler the wrapper can't locate the SDK
+    # GCC, returns empty strings, and causes Kconfig to abort with
+    # "init/Kconfig: syntax error".
+    #
+    # Fix: replace gcc-version.sh with the standard Linux kernel version that
+    # queries the compiler directly via preprocessor macro expansion, and supply
+    # ld-version.sh if it is missing from the SDK tree.
+
+    cat > scripts/gcc-version.sh << 'GCCEOF'
+#!/bin/sh
+# Standard gcc-version.sh — compatible with any GCC cross-compiler.
+if [ -z "$*" ]; then echo "Usage: gcc-version.sh <compiler>" >&2; exit 1; fi
+compiler="$*"
+MAJOR=$(echo __GNUC__            | $compiler -E -x c - | tail -1)
+MINOR=$(echo __GNUC_MINOR__      | $compiler -E -x c - | tail -1)
+PATCH=$(echo __GNUC_PATCHLEVEL__ | $compiler -E -x c - | tail -1)
+printf "%02d%02d%02d\n" "$MAJOR" "$MINOR" "$PATCH"
+GCCEOF
+    chmod +x scripts/gcc-version.sh
+
+    # ld-version.sh may be absent in older Rockchip SDK kernel trees.
+    if [ ! -x scripts/ld-version.sh ]; then
+      cat > scripts/ld-version.sh << 'LDEOF'
+#!/bin/sh
+# Standard ld-version.sh — compatible with binutils ld.
+if [ -z "$*" ]; then echo "Usage: ld-version.sh <ld>" >&2; exit 1; fi
+LD="$*"
+LD_V=$($LD --version | head -1 | sed 's/.*\b\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/')
+MAJOR=$(echo "$LD_V" | cut -d. -f1)
+MINOR=$(echo "$LD_V" | cut -d. -f2)
+printf "%02d%02d\n" "$MAJOR" "$MINOR"
+LDEOF
+      chmod +x scripts/ld-version.sh
+    fi
+
     echo "=== available ARM defconfigs ==="
     ls arch/arm/configs/ | grep -iE 'luckfox|rv110[36]' || true
 

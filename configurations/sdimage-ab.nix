@@ -30,7 +30,13 @@
 { lib, ... }:
 
 {
-  imports = [ ../configuration.nix ];
+  imports = [
+    ../configuration.nix
+    # Builds the kernel, DTBs, and modules from the LuckfoxTECH SDK source.
+    # Kept in a separate file so QEMU configs (which also import configuration.nix)
+    # do not force this derivation to be evaluated.
+    ../hardware/pico-mini-b-kernel.nix
+  ];
 
   system.abRootfs.enable = true;
 

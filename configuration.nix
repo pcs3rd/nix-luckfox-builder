@@ -20,6 +20,20 @@ in
     ./hardware/pico-mini-b.nix
   ];
 
+  # ── Kernel (built from LuckfoxTECH SDK source) ──────────────────────────────
+  # Uncomment these three lines to build the kernel from source.
+  # After the first build, check result/dtbs/ to confirm the DTB filename:
+  #   nix build .#luckfox-kernel && ls result/dtbs/
+  #
+  # NOTE: keep these commented out in this file.  Nix evaluates all module
+  # definitions even for overridden options, so referencing luckfox-kernel
+  # here would force it to build in QEMU contexts too.  Instead, set these
+  # in a hardware-only configuration that QEMU configs do not import.
+  #
+  # device.kernel            = "${localPkgs.luckfox-kernel}/zImage";
+  # device.dtb               = "${localPkgs.luckfox-kernel}/dtbs/rv1103-luckfox-pico-mini-b.dtb";
+  # device.kernelModulesPath = "${localPkgs.luckfox-kernel}/lib/modules";
+
   # ── Extra packages ──────────────────────────────────────────────────────────
   # Binaries from each package's bin/ are copied into /bin on the rootfs.
   # Prefer pkgs.pkgsStatic.foo — static binaries need no dynamic linker.
@@ -31,12 +45,6 @@ in
     pkgs.pkgsStatic.util-linux # lsblk, blkid, etc. — static so no dynamic linker needed. Use this for qemu troubleshooting
     # nrfnet is added automatically when services.nrfnet.enable = true
   ];
-
-  # ── Kernel modules ──────────────────────────────────────────────────────────
-  # Required for CONFIG_ZRAM=m and any other =m driver.
-  # Uncomment once you have verified the luckfox-kernel-modules build succeeds:
-  #   nix build .#packages.aarch64-darwin.pico-mini-b
-  # device.kernelModulesPath = "${localPkgs.luckfox-kernel-modules}/lib/modules";
 
   # ── System ──────────────────────────────────────────────────────────────────
 

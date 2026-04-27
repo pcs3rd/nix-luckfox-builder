@@ -28,7 +28,10 @@
 { lib, ... }:
 
 {
-  imports = [ ../configuration.nix ];
+  imports = [
+    ../configuration.nix
+    ../hardware/pico-mini-b-kernel.nix
+  ];
 
   system.sdOverlay.enable = true;
 

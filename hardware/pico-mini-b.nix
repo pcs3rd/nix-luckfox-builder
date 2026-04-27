@@ -1,40 +1,23 @@
 # Hardware profile for the Luckfox Pico Mini B.
 #
-# The kernel, DTBs, and modules are built from the LuckfoxTECH SDK source by
-# pkgs/luckfox-kernel.nix — no pre-built binaries need to be dropped in
-# manually.
+# This file sets hardware-specific constants that apply to every build
+# (USB role-switch path, A/B slot offset, etc.) but deliberately does NOT
+# set device.kernel / device.dtb / device.kernelModulesPath here.
 #
-# ── Finding the right DTB ─────────────────────────────────────────────────────
+# Those are set in configuration.nix so that QEMU configurations (which
+# import configuration.nix) can override device.kernel with the QEMU ARM
+# kernel without forcing the luckfox-kernel derivation to be evaluated —
+# Nix evaluates all module definitions even for overridden options, so any
+# derivation referenced here would be built in every context.
 #
-# The first build will print the DTBs installed in result/dtbs/.  If the name
-# below doesn't match, update device.dtb to the correct path.  Common values:
-#
-#   ${luckfoxKernel}/dtbs/rv1103-luckfox-pico-mini-b.dtb
-#   ${luckfoxKernel}/dtbs/rv1106-luckfox-pico-mini-b.dtb
-#   ${luckfoxKernel}/dtbs/luckfox-pico-mini-b.dtb
-#
-# Build and inspect:
-#   nix build .#packages.<system>.luckfox-kernel
-#   ls result/dtbs/
+# ── Kernel from source ────────────────────────────────────────────────────────
+# See configuration.nix for the device.kernel / device.dtb settings that
+# build the kernel from the LuckfoxTECH SDK source via pkgs/luckfox-kernel.nix.
 
-{ pkgs, lib, ... }:
-
-let
-  luckfoxKernel = import ../pkgs/luckfox-kernel.nix { inherit pkgs; };
-in
+{ ... }:
 
 {
-  device = {
-    name   = "pico-mini-b";
-    # mkDefault allows QEMU configs (and any other overlay module) to override
-    # these with lib.mkForce or a plain assignment without a conflict error.
-    kernel            = lib.mkDefault "${luckfoxKernel}/zImage";
-    # Adjust the DTB filename to match what `nix build .#luckfox-kernel` produces.
-    # See result/dtbs/ after the first build.
-    dtb               = lib.mkDefault "${luckfoxKernel}/dtbs/rv1103-luckfox-pico-mini-b.dtb";
-    # Kernel modules — enables modprobe for =m drivers (zram, etc.)
-    kernelModulesPath = lib.mkDefault "${luckfoxKernel}/lib/modules";
-  };
+  device.name = "pico-mini-b";
 
   # ── A/B rootfs slot configuration ────────────────────────────────────────
   # Enables squashfs + overlayfs A/B upgrades with 4 partitions:
