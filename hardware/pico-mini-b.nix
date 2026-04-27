@@ -17,7 +17,7 @@
 #   nix build .#packages.<system>.luckfox-kernel
 #   ls result/dtbs/
 
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 
 let
   luckfoxKernel = import ../pkgs/luckfox-kernel.nix { inherit pkgs; };
@@ -26,12 +26,14 @@ in
 {
   device = {
     name   = "pico-mini-b";
-    kernel = "${luckfoxKernel}/zImage";
+    # mkDefault allows QEMU configs (and any other overlay module) to override
+    # these with lib.mkForce or a plain assignment without a conflict error.
+    kernel            = lib.mkDefault "${luckfoxKernel}/zImage";
     # Adjust the DTB filename to match what `nix build .#luckfox-kernel` produces.
     # See result/dtbs/ after the first build.
-    dtb    = "${luckfoxKernel}/dtbs/rv1103-luckfox-pico-mini-b.dtb";
+    dtb               = lib.mkDefault "${luckfoxKernel}/dtbs/rv1103-luckfox-pico-mini-b.dtb";
     # Kernel modules — enables modprobe for =m drivers (zram, etc.)
-    kernelModulesPath = "${luckfoxKernel}/lib/modules";
+    kernelModulesPath = lib.mkDefault "${luckfoxKernel}/lib/modules";
   };
 
   # ── A/B rootfs slot configuration ────────────────────────────────────────
