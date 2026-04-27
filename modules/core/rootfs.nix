@@ -3,7 +3,8 @@
 {
   # ── Root filesystem directory ───────────────────────────────────────────────
   config.system.build.rootfs = pkgs.runCommand "rootfs" {} ''
-    mkdir -p $out/{bin,sbin,etc,proc,sys,dev,root,lib,var/log,mnt,newroot}
+    mkdir -p $out/{bin,sbin,etc,proc,sys,dev,root,lib,tmp,var/log,mnt,newroot}
+    chmod 1777 $out/tmp
 
     # ── Kernel modules ─────────────────────────────────────────────────────
     # Copy /lib/modules/<ver>/ so that modprobe can load kernel modules
