@@ -1,10 +1,12 @@
-{ pkgs, lib }:
+{ pkgs, lib, buildDate ? "unknown" }:
 
 # configuration may be a single module (path or attrset) or a list of modules.
 { configuration }:
 
 lib.evalModules {
-  specialArgs = { inherit pkgs lib; };
+  # buildDate is passed from the flake (self.lastModifiedDate) and available
+  # as a plain function argument in any module: { buildDate, ... }: { ... }
+  specialArgs = { inherit pkgs lib buildDate; };
 
   modules = lib.toList configuration ++ [
     ../modules/core/options.nix

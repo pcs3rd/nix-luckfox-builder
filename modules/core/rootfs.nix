@@ -294,6 +294,16 @@ EOF
     # ── hostname ───────────────────────────────────────────────────────────
     echo "${config.networking.hostname}" > $out/etc/hostname
 
+    # ── Login banner (/etc/issue) — shown by getty before the login prompt ─
+    ${lib.optionalString (config.system.banner != null) ''
+      cp ${pkgs.writeText "issue" config.system.banner} $out/etc/issue
+    ''}
+
+    # ── Message of the day (/etc/motd) — shown by login after auth ─────────
+    ${lib.optionalString (config.system.motd != null) ''
+      cp ${pkgs.writeText "motd" config.system.motd} $out/etc/motd
+    ''}
+
     # ── user / password database ───────────────────────────────────────────
     # passwd: shadow-style (password field is 'x', real hash is in shadow)
     cat > $out/etc/passwd << 'PASSWD_EOF'

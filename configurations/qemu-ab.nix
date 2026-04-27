@@ -54,6 +54,10 @@
   # QEMU has ample RAM; zram is unnecessary.
   system.zram.enable = lib.mkForce false;
 
+  # QEMU virt has no USB controller — disable gadget and mode-switch scripts.
+  system.usbGadget.enable = lib.mkForce false;
+  system.usb.mode         = lib.mkForce "otg";   # disables the role-switch script
+
   # A/B with squashfs + overlayfs.
   # Slots are found by partition number (p2/p3); persist by ext4 label (p4).
   system.abRootfs.enable = true;

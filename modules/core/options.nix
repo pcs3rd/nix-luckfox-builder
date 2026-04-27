@@ -330,6 +330,29 @@ with lib;
       '';
     };
 
+    system.banner = mkOption {
+      type        = types.nullOr types.lines;
+      default     = null;
+      description = ''
+        Pre-login banner written to /etc/issue.
+        Displayed by getty before the login prompt.
+        Supports busybox escape sequences:
+          \n — hostname    \l — tty line
+          \s — OS name     \r — kernel release
+        Set to null (default) to omit /etc/issue entirely.
+      '';
+    };
+
+    system.motd = mkOption {
+      type        = types.nullOr types.lines;
+      default     = null;
+      description = ''
+        Message of the day written to /etc/motd.
+        Displayed by login after successful authentication.
+        Set to null (default) to omit /etc/motd entirely.
+      '';
+    };
+
     users = {
       root = {
         hashedPassword = lib.mkOption {

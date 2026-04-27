@@ -58,6 +58,12 @@
             OVERLAY_FS      = yes;   # overlayfs for writable rootfs layer
             SQUASHFS_LZ4    = yes;   # lz4 decompression for slot partitions
 
+            # ── Remove the "-NixOS" suffix from the kernel version string ───
+            # nixpkgs sets CONFIG_LOCALVERSION="-NixOS" by default; override
+            # it so `uname -r` shows a plain version (e.g. 6.1.x-armv7l-hf)
+            # rather than 6.1.x-NixOS.  An empty string is the right value.
+            LOCALVERSION    = freeform "";
+
             # ── Subsystems never present on QEMU virt ───────────────────────
             # All disabled with mkForce so common-config.nix can't override us.
             # USB: QEMU virt has no USB controller (gadget disabled in config)
@@ -114,7 +120,15 @@
         crossSystem = { config = "armv7l-unknown-linux-musleabihf"; };
       };
 
-      mkSystem   = import ./lib/mkSystem.nix { inherit pkgs; lib = pkgs.lib; };
+      mkSystem   = import ./lib/mkSystem.nix {
+        inherit pkgs;
+        lib      = pkgs.lib;
+        # Format self.lastModifiedDate (YYYYMMDDHHmmss) → YYYY-MM-DD.
+        # Falls back to "unknown" for dirty trees where lastModifiedDate is absent.
+        buildDate =
+          let d = self.lastModifiedDate or "00000000000000";
+          in "${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d}";
+      };
 
       # ── System evaluations ──────────────────────────────────────────────────
       picoMiniB         = mkSystem   { configuration = ./configuration.nix;             };

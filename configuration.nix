@@ -9,7 +9,7 @@
 #   nix build .#packages.aarch64-darwin.sdImage-flashable
 #   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
 
-{ pkgs, ... }:
+{ pkgs, buildDate ? "unknown", ... }:
 
 let
   localPkgs = import ./pkgs { inherit pkgs; };
@@ -147,6 +147,20 @@ in
     host   = "companion.local";   # hostname or IP of your Companion server
     port   = 16622;
   };
+
+  # ── Login banner ────────────────────────────────────────────────────────────
+  # /etc/issue — shown by getty before the login prompt.
+  # \n = hostname, \l = tty, \r = kernel release.
+  system.banner = ''
+    Luckfox Pico Mini B — \n  (\l)
+    Kernel \r  |  Built ${buildDate}
+  '';
+
+  # /etc/motd — shown after successful login.
+  system.motd = ''
+    Type 'slot' to check the active A/B slot.
+    Type 'upgrade < image' to update the inactive slot.
+  '';
 
   # ── Networking ──────────────────────────────────────────────────────────────
   networking = {
