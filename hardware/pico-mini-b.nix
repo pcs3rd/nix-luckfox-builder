@@ -1,20 +1,37 @@
 # Hardware profile for the Luckfox Pico Mini B.
 #
-# Place your Luckfox SDK build outputs here before building:
-#   hardware/kernel/zImage
-#   hardware/kernel/pico-mini-b.dtb
+# The kernel, DTBs, and modules are built from the LuckfoxTECH SDK source by
+# pkgs/luckfox-kernel.nix — no pre-built binaries need to be dropped in
+# manually.
 #
-# Until those files are present, kernel and dtb default to null and the SD
-# image step will be skipped (rootfs + uboot bundles still build fine).
+# ── Finding the right DTB ─────────────────────────────────────────────────────
+#
+# The first build will print the DTBs installed in result/dtbs/.  If the name
+# below doesn't match, update device.dtb to the correct path.  Common values:
+#
+#   ${luckfoxKernel}/dtbs/rv1103-luckfox-pico-mini-b.dtb
+#   ${luckfoxKernel}/dtbs/rv1106-luckfox-pico-mini-b.dtb
+#   ${luckfoxKernel}/dtbs/luckfox-pico-mini-b.dtb
+#
+# Build and inspect:
+#   nix build .#packages.<system>.luckfox-kernel
+#   ls result/dtbs/
 
-{ ... }:
+{ pkgs, ... }:
+
+let
+  luckfoxKernel = import ../pkgs/luckfox-kernel.nix { inherit pkgs; };
+in
 
 {
   device = {
     name   = "pico-mini-b";
-    # Uncomment once you have the SDK kernel outputs:
-    # kernel = ./kernel/zImage;
-    # dtb    = ./kernel/pico-mini-b.dtb;
+    kernel = "${luckfoxKernel}/zImage";
+    # Adjust the DTB filename to match what `nix build .#luckfox-kernel` produces.
+    # See result/dtbs/ after the first build.
+    dtb    = "${luckfoxKernel}/dtbs/rv1103-luckfox-pico-mini-b.dtb";
+    # Kernel modules — enables modprobe for =m drivers (zram, etc.)
+    kernelModulesPath = "${luckfoxKernel}/lib/modules";
   };
 
   # ── A/B rootfs slot configuration ────────────────────────────────────────

@@ -458,6 +458,9 @@ RUNEOF
         pico-mini-b       = picoMiniB.config.system.build.firmware;
         rootfs            = picoMiniB.config.system.build.rootfs;
         uboot             = picoMiniB.config.system.build.uboot;
+        # Kernel built from SDK source (zImage + DTBs + modules).
+        # Inspect result/dtbs/ to find the correct DTB name for hardware/pico-mini-b.nix.
+        luckfox-kernel    = import ./pkgs/luckfox-kernel.nix { inherit pkgs; };
         sdImage           = picoMiniB.config.system.build.image;
         sdImage-flashable = picoMiniB-sdimage.config.system.build.sdImage;
 

@@ -13,6 +13,9 @@
 
 {
   uboot                  = import ./uboot.nix                  { inherit pkgs; };
+  # luckfox-kernel builds zImage + DTBs + modules from the SDK source in one shot.
+  # luckfox-kernel-modules is kept for backwards compatibility (modules-only build).
+  luckfox-kernel         = import ./luckfox-kernel.nix         { inherit pkgs; };
   luckfox-kernel-modules = import ./luckfox-kernel-modules.nix { inherit pkgs; };
   sysinfo                = import ./sysinfo/sysinfo.nix        { inherit pkgs; };
   htop                   = import ./htop.nix                   { inherit pkgs; };

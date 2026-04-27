@@ -65,6 +65,9 @@
 #
 # To inspect the active slot at runtime:   /bin/slot
 # To force a specific slot on next boot:   /bin/slot a   (or /bin/slot b)
+# To share a config file between slots:    /bin/slot-share /etc/myapp/config
+# To list shared files:                    /bin/slot-share --list
+# To un-share a file:                      /bin/slot-share --unshare /etc/myapp/config
 #
 # ── Configuration ─────────────────────────────────────────────────────────────
 #
@@ -397,6 +400,180 @@ let
     esac
   '';
 
+  # ── /bin/slot-share ──────────────────────────────────────────────────────
+  slotShareScript = pkgs.writeScript "slot-share" ''
+    #!/bin/sh
+    #
+    # slot-share — hard-link files between slot A and slot B persist layers
+    #
+    # Both slots' writable upper directories live on the same ext4 persist
+    # partition, so a hard link is literally one inode on disk — no duplicate
+    # data.  Writes to the file from either slot go to the same inode and are
+    # instantly visible from both.
+    #
+    # Usage:
+    #   slot-share /etc/myapp/config     — share a file between both slots
+    #   slot-share --list                — list files currently shared
+    #   slot-share --unshare /etc/myapp/config  — give each slot its own copy
+    #
+    # Notes:
+    #   • The file must already exist somewhere on the running system.
+    #     If it is only in the squashfs lower layer (not yet written to the
+    #     overlay upper), slot-share copies it up first.
+    #   • The persist partition is mounted read-write for the duration of the
+    #     command and unmounted before exit.
+    #   • Hard links cannot cross filesystem boundaries, so this only works
+    #     for files on the overlay (rootfs).  You cannot share files that live
+    #     exclusively inside the squashfs (they are read-only there).
+
+    PERSIST_LABEL="${cfg.persistLabel}"
+    PERSIST_MNT=""
+
+    die() { echo "slot-share: error: $*" >&2; exit 1; }
+
+    cleanup() {
+      if [ -n "$PERSIST_MNT" ]; then
+        umount "$PERSIST_MNT" 2>/dev/null || true
+        rmdir  "$PERSIST_MNT" 2>/dev/null || true
+      fi
+    }
+    trap cleanup EXIT INT TERM
+
+    # Mount the persist partition at a temporary path so we can access both
+    # slot-a/upper and slot-b/upper regardless of which slot is running.
+    PERSIST_DEV=$(findfs LABEL="$PERSIST_LABEL" 2>/dev/null) \
+      || die "no partition with LABEL=$PERSIST_LABEL"
+
+    PERSIST_MNT=$(mktemp -d /tmp/persist-XXXXXX) \
+      || die "mktemp failed"
+
+    mount -t ext4 "$PERSIST_DEV" "$PERSIST_MNT" \
+      || die "cannot mount persist partition ($PERSIST_DEV)"
+
+    # Which slot are we running on right now?
+    CURRENT=$(cat /var/log/boot-slot 2>/dev/null | tr -d '[:space:]')
+    [ "$CURRENT" = "b" ] || CURRENT=a
+    [ "$CURRENT" = "b" ] && OTHER=a || OTHER=b
+
+    CUR_UPPER="$PERSIST_MNT/slot-$CURRENT/upper"
+    OTH_UPPER="$PERSIST_MNT/slot-$OTHER/upper"
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    # Print the inode number of a file (busybox stat supports -c '%i').
+    inode_of() { stat -c '%i' "$1" 2>/dev/null; }
+
+    # Ensure a file from the running root is present in the current upper layer.
+    # Overlayfs only copies up on first write; for a read-only file that has
+    # never been touched, the upper entry won't exist yet.
+    ensure_in_upper() {
+      local rel="$1" dst="$CUR_UPPER/$1"
+      if [ ! -e "$dst" ]; then
+        # Source from the live root (the overlay's merged view).
+        [ -e "/$rel" ] || return 1
+        mkdir -p "$(dirname "$dst")"
+        cp -p "/$rel" "$dst"
+      fi
+      return 0
+    }
+
+    case "$1" in
+
+      # ── slot-share /path/to/file ──────────────────────────────────────────
+      /*)
+        FILE="$1"
+        REL="''${FILE#/}"
+        CUR_FILE="$CUR_UPPER/$REL"
+        OTH_FILE="$OTH_UPPER/$REL"
+
+        # Check the file actually exists (either in overlay or squashfs lower).
+        [ -e "$FILE" ] || die "$FILE does not exist"
+
+        # Ensure the file is in the current slot's upper layer.
+        ensure_in_upper "$REL" \
+          || die "could not copy $FILE into slot $CURRENT upper layer"
+
+        # Already shared?
+        if [ -e "$OTH_FILE" ]; then
+          CI=$(inode_of "$CUR_FILE")
+          OI=$(inode_of "$OTH_FILE")
+          if [ -n "$CI" ] && [ "$CI" = "$OI" ]; then
+            echo "slot-share: $FILE is already shared between slot A and slot B"
+            exit 0
+          fi
+          # Other slot has a different version — replace with a hard link to ours.
+          rm -f "$OTH_FILE"
+        fi
+
+        mkdir -p "$(dirname "$OTH_FILE")"
+        ln "$CUR_FILE" "$OTH_FILE" \
+          || die "hard link failed — are both uppers on the same filesystem?"
+
+        echo "slot-share: $FILE is now shared (one copy, two slots)"
+        ;;
+
+      # ── slot-share --list ─────────────────────────────────────────────────
+      --list|-l)
+        echo "Files shared between slot-a and slot-b persist layers:"
+        COUNT=0
+        if [ -d "$CUR_UPPER" ] && [ -d "$OTH_UPPER" ]; then
+          # Walk the current upper; compare inodes with the other upper.
+          find "$CUR_UPPER" -type f | while IFS= read -r CUR_FILE; do
+            REL="''${CUR_FILE#$CUR_UPPER}"
+            OTH_FILE="$OTH_UPPER$REL"
+            [ -e "$OTH_FILE" ] || continue
+            CI=$(inode_of "$CUR_FILE")
+            OI=$(inode_of "$OTH_FILE")
+            [ -n "$CI" ] && [ "$CI" = "$OI" ] || continue
+            echo "  $REL"
+            COUNT=$(( COUNT + 1 ))
+          done
+        fi
+        [ "$COUNT" -eq 0 ] && echo "  (none)"
+        ;;
+
+      # ── slot-share --unshare /path ────────────────────────────────────────
+      --unshare|-u)
+        FILE="$2"
+        [ -n "$FILE" ] || { echo "usage: slot-share --unshare <path>" >&2; exit 1; }
+        REL="''${FILE#/}"
+        CUR_FILE="$CUR_UPPER/$REL"
+        OTH_FILE="$OTH_UPPER/$REL"
+
+        UNSHARED=0
+        for SLOT_FILE in "$CUR_FILE" "$OTH_FILE"; do
+          [ -f "$SLOT_FILE" ] || continue
+          NLINK=$(stat -c '%h' "$SLOT_FILE" 2>/dev/null)
+          if [ "''${NLINK:-1}" -gt 1 ]; then
+            # Break the hard link: copy to a temp file then rename over it.
+            TMP="''${SLOT_FILE}.tmp.$$"
+            cp -p "$SLOT_FILE" "$TMP" && mv "$TMP" "$SLOT_FILE" \
+              || { rm -f "$TMP" 2>/dev/null; die "copy failed for $SLOT_FILE"; }
+            UNSHARED=$(( UNSHARED + 1 ))
+          fi
+        done
+
+        if [ "$UNSHARED" -gt 0 ]; then
+          echo "slot-share: $FILE unshared — each slot now has its own independent copy"
+        else
+          echo "slot-share: $FILE was not shared (or does not exist in a slot upper layer)"
+        fi
+        ;;
+
+      ""|--help|-h)
+        echo "usage: slot-share <path>              share a file between both slots"
+        echo "       slot-share --list              list files currently shared"
+        echo "       slot-share --unshare <path>    give each slot its own copy"
+        ;;
+
+      *)
+        echo "slot-share: unrecognised argument: $1" >&2
+        echo "usage: slot-share <path> | --list | --unshare <path>" >&2
+        exit 1
+        ;;
+    esac
+  '';
+
   # ── Standalone rootfs squashfs image (for streaming via `upgrade`) ────────
   # Written byte-for-byte to a raw slot partition — no filesystem wrapper.
   # -mkfs-time 0 -all-time 0 suppress embedded timestamps for reproducibility.
@@ -429,9 +606,10 @@ in
       packages = [
         (pkgs.runCommand "ab-rootfs-scripts" {} ''
           mkdir -p $out/bin
-          cp ${upgradeScript} $out/bin/upgrade
-          cp ${slotScript}    $out/bin/slot
-          chmod +x $out/bin/upgrade $out/bin/slot
+          cp ${upgradeScript}   $out/bin/upgrade
+          cp ${slotScript}      $out/bin/slot
+          cp ${slotShareScript} $out/bin/slot-share
+          chmod +x $out/bin/upgrade $out/bin/slot $out/bin/slot-share
         '')
       ];
     })
