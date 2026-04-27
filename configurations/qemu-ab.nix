@@ -62,6 +62,7 @@
   # Slots are found by partition number (p2/p3); persist by ext4 label (p4).
   system.abRootfs.enable = true;
 
-  # 2048 MiB total → p1=64 MiB boot, p2/p3=~863 MiB each, p4=256 MiB persist.
+  # 2048 MiB disk → p1=64 MiB boot, p2/p3=~863 MiB each, p4=256 MiB persist.
+  # RAM = 64 MB (matching real hardware); zram is disabled (no kernel modules).
   system.imageSize = lib.mkDefault 2048;
 }

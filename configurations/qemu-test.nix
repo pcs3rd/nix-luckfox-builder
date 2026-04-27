@@ -29,13 +29,11 @@
 
   # meshing-around (and its bundled Python) is kept enabled here.
   # The stdlib trimming in pkgs/meshing-around.nix removes ~45 MB of unused
-  # modules (tkinter, test/, idlelib, lib2to3, …), and QEMU runs at 512 MB,
-  # so the initramfs fits comfortably.  Re-disable with lib.mkForce false if
-  # you ever hit a kernel panic due to initramfs size.
+  # modules (tkinter, test/, idlelib, lib2to3, …).  Re-disable with
+  # lib.mkForce false if you hit a kernel panic due to initramfs size.
 
   # zram requires kernel modules (/lib/modules/<ver>/…/zram.ko).
   # The QEMU initramfs has no kernel modules tree, so modprobe would fail.
-  # 512 MB QEMU RAM is ample anyway — disable zram for the initramfs build.
   system.zram.enable = lib.mkForce false;
 
 }
