@@ -65,30 +65,49 @@ let
   # time.  postPatch copies them into the (writable) build tree before any
   # make invocation, bypassing the SDK's gcc-wrapper.py entirely.
   #
-  # Note: $compiler, $*, $LD, etc. are shell variables in the generated files —
+  # Note: $compiler, $LD, etc. are shell variables in the generated files —
   # they use plain $ (no braces) so Nix does not interpolate them.
+  #
+  # The Luckfox SDK Makefile sets:
+  #   CC = scripts/gcc-wrapper.py $(CROSS_COMPILE)gcc
+  # so gcc-version.sh is called as:
+  #   gcc-version.sh scripts/gcc-wrapper.py /nix/store/.../armv7l-...-gcc
+  # The real compiler is always the LAST positional argument.
+  # We loop over all args so "last arg wins" regardless of how many wrappers
+  # are prepended.  This also handles the plain single-arg form.
   gccVersionSh = builtins.toFile "gcc-version.sh" ''
     #!/bin/sh
-    # Standard gcc-version.sh — queries the compiler directly.
-    # Called by the kernel Makefile as:  gcc-version.sh $(CC)
-    if [ -z "$*" ]; then echo "Usage: gcc-version.sh <compiler>" >&2; exit 1; fi
-    compiler="$*"
-    MAJOR=$(echo __GNUC__            | $compiler -E -x c - | tail -1)
-    MINOR=$(echo __GNUC_MINOR__      | $compiler -E -x c - | tail -1)
-    PATCH=$(echo __GNUC_PATCHLEVEL__ | $compiler -E -x c - | tail -1)
+    # gcc-version.sh — queries the compiler directly.
+    # Handles both: gcc-version.sh <compiler>
+    # and SDK form:  gcc-version.sh scripts/gcc-wrapper.py <compiler>
+    # The real compiler is always the last positional argument.
+    if [ $# -eq 0 ]; then echo "Usage: gcc-version.sh [wrapper] <compiler>" >&2; exit 1; fi
+    for arg in "$@"; do compiler="$arg"; done
+    MAJOR=$(echo __GNUC__            | "$compiler" -E -x c - | tail -1)
+    MINOR=$(echo __GNUC_MINOR__      | "$compiler" -E -x c - | tail -1)
+    PATCH=$(echo __GNUC_PATCHLEVEL__ | "$compiler" -E -x c - | tail -1)
     printf "%02d%02d%02d\n" "$MAJOR" "$MINOR" "$PATCH"
   '';
 
   ldVersionSh = builtins.toFile "ld-version.sh" ''
     #!/bin/sh
-    # Standard ld-version.sh — compatible with binutils ld.
-    # Called by the kernel Makefile as:  ld-version.sh $(LD)
-    if [ -z "$*" ]; then echo "Usage: ld-version.sh <ld>" >&2; exit 1; fi
-    LD="$*"
+    # ld-version.sh — compatible with binutils ld.
+    # Called as: ld-version.sh $(LD)  — LD may be empty on some SDK configs.
+    # If called with no args, return a safe minimum version.
+    if [ $# -eq 0 ]; then printf "0000\n"; exit 0; fi
+    for arg in "$@"; do LD="$arg"; done
     LD_V=$($LD --version | head -1 | sed 's/.*\b\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/')
     MAJOR=$(echo "$LD_V" | cut -d. -f1)
     MINOR=$(echo "$LD_V" | cut -d. -f2)
     printf "%02d%02d\n" "$MAJOR" "$MINOR"
+  '';
+
+  # clang-version.sh — the SDK version also routes through gcc-wrapper.py.
+  # Since we build with GCC (not clang), return 0 so Kconfig skips clang paths.
+  clangVersionSh = builtins.toFile "clang-version.sh" ''
+    #!/bin/sh
+    # clang-version.sh — return 0 (not building with clang).
+    printf "000000\n"
   '';
 
 in
@@ -129,13 +148,28 @@ pkgs.stdenv.mkDerivation {
   # unconditional and cannot be skipped or mis-ordered the way a shell heredoc
   # inside configurePhase can be.
   postPatch = ''
+    # Replace SDK build scripts that call the bundled gcc-wrapper.py shim.
+    # The shim is not present in the Nix sandbox; these replacements talk to
+    # the cross-compiler directly.
     cp ${gccVersionSh} scripts/gcc-version.sh
     chmod +x scripts/gcc-version.sh
 
     cp ${ldVersionSh} scripts/ld-version.sh
     chmod +x scripts/ld-version.sh
 
-    echo "patched scripts/gcc-version.sh and scripts/ld-version.sh"
+    cp ${clangVersionSh} scripts/clang-version.sh
+    chmod +x scripts/clang-version.sh
+
+    # The SDK top-level Makefile overrides CC to:
+    #   CC = scripts/gcc-wrapper.py $(CROSS_COMPILE)gcc
+    # Strip the wrapper so CC becomes the bare cross-compiler.  This means
+    # gcc-version.sh receives a single real compiler path, not a
+    # "scripts/gcc-wrapper.py /nix/store/..." pair.  The gcc-version.sh
+    # last-arg logic handles either form, but removing the wrapper also fixes
+    # any other scripts that unconditionally treat $1 as the compiler.
+    sed -i 's|scripts/gcc-wrapper\.py ||g' Makefile || true
+
+    echo "patched scripts/gcc-version.sh, scripts/ld-version.sh, scripts/clang-version.sh, Makefile"
   '';
 
   configurePhase = ''
