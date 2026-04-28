@@ -82,10 +82,18 @@ let
       bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
     '' else ''
       # No board DTB in the boot partition (e.g. QEMU).  Use the FDT that
-      # the prior boot stage (QEMU) passed to U-Boot.  U-Boot exports it as
-      # ''${fdtcontroladdr} — the complete virt-machine device tree including
-      # memory map, virtio devices, UART, etc.
-      bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdtcontroladdr}
+      # the prior boot stage (QEMU) passed to U-Boot (''${fdtcontroladdr}).
+      #
+      # Problem: fdtcontroladdr is inside U-Boot's own relocated image region,
+      # which the LMB allocator already owns.  bootz calls boot_relocate_fdt()
+      # to reserve the FDT's memory, which fails ("Failed to reserve memory")
+      # because that address is already allocated.
+      #
+      # Fix: copy the control FDT to fdt_addr_r (0x41E00000) — free RAM between
+      # the kernel and the QEMU machine FDT.  128 KB is ample for the QEMU virt
+      # device tree.  After fdt move, bootz can freely reserve fdt_addr_r.
+      fdt move ''${fdtcontroladdr} ''${fdt_addr_r} 0x20000
+      bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
     ''}
   '';
 in
