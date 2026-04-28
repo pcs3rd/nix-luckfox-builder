@@ -140,8 +140,8 @@ LDEOF
     # any inter-option dependencies.  Options absent from this kernel version
     # are silently ignored by olddefconfig.
     # Pipe the heredoc through sed to strip leading whitespace before appending.
-    # The Nix ''...'' string cannot strip indentation when SIZECFG sits at
-    # column 0 (the minimum is 0, so nothing is stripped), so we strip manually.
+    # Nix indented strings (the "two single-quote" form) cannot strip indentation
+    # when the closing delimiter is at column 0, so we strip manually with sed.
     # Kconfig requires lines like "CONFIG_FOO=y" with no leading whitespace.
     sed 's/^[[:space:]]*//' >> .config << 'SIZECFG'
     # Camera / ISP / media — hardware ISP present on RV1103 but unused here.
