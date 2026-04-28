@@ -79,6 +79,7 @@
 #     persistLabel        = "persist";  # ext4 label of the persist partition
 #     persistSize         = 256;        # MiB
 #     squashfsCompression = "lz4";      # compression algorithm
+#     swapSize            = 256;        # MiB disk swap in persist (0 = off)
 #   };
 
 { pkgs, config, lib, ... }:
@@ -184,6 +185,24 @@ let
 
     mkdir -p /persist/slot-"$SLOT"/upper /persist/slot-"$SLOT"/work
 
+    ${lib.optionalString (cfg.swapSize > 0) ''
+    # ── Disk-backed swap from persist partition ─────────────────────────────
+    # /persist/swapfile is created here on first boot and activated with
+    # swapon.  Because the persist mount persists inside the kernel VFS through
+    # switch_root, the swap stays live for the entire system lifetime with no
+    # userspace service required.
+    SWAPFILE=/persist/swapfile
+    if [ ! -f "$SWAPFILE" ]; then
+      echo "slot-select: creating swap file (${toString cfg.swapSize} MiB)..."
+      dd if=/dev/zero of="$SWAPFILE" bs=1M count=${toString cfg.swapSize} 2>/dev/null
+      chmod 600 "$SWAPFILE"
+      mkswap "$SWAPFILE"
+    fi
+    swapon "$SWAPFILE" \
+      && echo "slot-select: swap activated (${toString cfg.swapSize} MiB)" \
+      || echo "slot-select: WARNING — swapon failed (non-fatal)" >&2
+    ''}
+
     # ── Overlay: squashfs lower + persist upper ─────────────────────────────
     # The squashfs mount at /squash and persist at /persist remain live inside
     # the kernel VFS even after switch_root discards the initramfs root — the
@@ -239,7 +258,7 @@ let
 
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox fs/bin/busybox
     chmod +x fs/bin/busybox
-    for cmd in sh mount umount dd switch_root sleep mdev awk mkdir cat insmod; do
+    for cmd in sh mount umount dd switch_root sleep mdev awk mkdir cat insmod${lib.optionalString (cfg.swapSize > 0) " mkswap swapon"}; do
       ln -sf busybox fs/bin/$cmd
     done
 

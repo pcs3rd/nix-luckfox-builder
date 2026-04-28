@@ -86,8 +86,10 @@ in
   # Upgrade: nix build .#rootfsPartition
   #          ssh root@luckfox upgrade < result/rootfs.squashfs
   #
-  system.abRootfs.enable = true;
-
+  system.abRootfs = {
+    enable   = true;
+    swapSize = 32;  # MiB — disable with 0
+  };
   # ── Bootloader ──────────────────────────────────────────────────────────────
   boot.uboot = {
     enable  = true;

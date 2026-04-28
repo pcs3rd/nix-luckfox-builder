@@ -129,6 +129,60 @@ LDEOF
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
       ${KERNEL_DEFCONFIG}
+
+    # ── Size reduction: disable large unused subsystems ──────────────────────
+    #
+    # The vendor defconfig targets a full SDK build with camera, audio, display,
+    # and Bluetooth.  This build targets meshing/IoT with no display, no camera,
+    # no audio, and LoRa/nRF over SPI instead of Bluetooth.
+    #
+    # Append overrides then re-validate with olddefconfig so Kconfig resolves
+    # any inter-option dependencies.  Options absent from this kernel version
+    # are silently ignored by olddefconfig.
+    # Pipe the heredoc through sed to strip leading whitespace before appending.
+    # The Nix ''...'' string cannot strip indentation when SIZECFG sits at
+    # column 0 (the minimum is 0, so nothing is stripped), so we strip manually.
+    # Kconfig requires lines like "CONFIG_FOO=y" with no leading whitespace.
+    sed 's/^[[:space:]]*//' >> .config << 'SIZECFG'
+    # Camera / ISP / media — hardware ISP present on RV1103 but unused here.
+    CONFIG_MEDIA_SUPPORT=n
+    CONFIG_VIDEO_DEV=n
+    CONFIG_DVB_CORE=n
+    CONFIG_RC_CORE=n
+    # Audio — no speaker or microphone in this use case.
+    CONFIG_SOUND=n
+    CONFIG_SND=n
+    # Display — no LCD or HDMI attached; DRM/FB unneeded.
+    CONFIG_DRM=n
+    CONFIG_FB=n
+    CONFIG_BACKLIGHT_LCD_SUPPORT=n
+    # Bluetooth — LoRa uses SPI; BT subsystem adds significant size.
+    CONFIG_BT=n
+    # Unused filesystems — only ext4 + squashfs + overlayfs + tmpfs needed.
+    CONFIG_BTRFS_FS=n
+    CONFIG_XFS_FS=n
+    CONFIG_JFS_FS=n
+    CONFIG_REISERFS_FS=n
+    CONFIG_F2FS_FS=n
+    CONFIG_NFS_FS=n
+    CONFIG_NFSD=n
+    CONFIG_CIFS=n
+    # Debug info inflates .ko module files; disable for production images.
+    CONFIG_DEBUG_INFO=n
+    # Staging drivers — experimental, not needed for production.
+    CONFIG_STAGING=n
+    # A/B boot: ensure squashfs + overlayfs are built-in (not modules) so
+    # the initramfs can mount them without needing insmod at boot.
+    CONFIG_SQUASHFS=y
+    CONFIG_SQUASHFS_LZ4=y
+    CONFIG_OVERLAY_FS=y
+SIZECFG
+
+    make \
+      ARCH=arm \
+      CROSS_COMPILE=${crossCompile} \
+      HOSTCC=${hostCC} \
+      olddefconfig
   '';
 
   buildPhase = ''
@@ -181,6 +235,15 @@ LDEOF
     # that do not exist on the target device.
     find "$out/lib/modules" -maxdepth 2 \
       \( -name build -o -name source \) -type l -delete || true
+
+    # ── Strip debug symbols from kernel modules ───────────────────────────────
+    # Even with CONFIG_DEBUG_INFO=n some .ko files may retain DWARF sections
+    # from the vendor build system.  Stripping cuts module size by 30–70 %.
+    echo "Stripping debug symbols from kernel modules..."
+    find "$out/lib/modules" -name '*.ko' | while read ko; do
+      ${crossCompile}strip --strip-debug "$ko" 2>/dev/null || true
+    done
+    echo "Modules after stripping: $(du -sh $out/lib/modules | cut -f1)"
 
     echo "=== kernel module version ==="
     ls "$out/lib/modules/"

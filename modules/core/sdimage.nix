@@ -23,10 +23,11 @@
 #   Partition 3  (squashfs, no label)         — slot B rootfs  (read-only)
 #   Partition 4  (ext4,     label: "persist") — overlayfs upper/work dirs
 #
-#   boot.scr (U-Boot distro boot, primary path): loads kernel + initramfs from p1,
-#   sets bootargs without root= — the initramfs reads the slot indicator byte,
-#   mounts the active squashfs slot, overlays the persist partition, and
-#   switch_root's into the result.
+#   boot.scr (U-Boot script bootmeth, sole boot path): loads kernel + initramfs
+#   from p1 with explicit 64 MB-safe load addresses; no extlinux.conf is written
+#   so U-Boot falls through from extlinux (seq 1) to script (seq 2) every time.
+#   The initramfs reads the slot indicator byte, mounts the active squashfs slot,
+#   overlays the persist partition, and switch_root's into the result.
 #
 # macOS-compatible: uses mkfs.ext4 -d to populate filesystems from a directory
 # tree — no losetup or mount required.
@@ -51,13 +52,26 @@ let
   # Loads the kernel and initramfs; the initramfs handles slot detection and
   # overlay setup — boot.scr no longer needs to read the slot indicator byte.
   #
-  # Uses distro_bootcmd environment variables for portability:
-  #   ${devtype}          — "mmc" (real hardware) or "virtio" (QEMU)
-  #   ${devnum}           — device index (0 for the first device)
-  #   ${distro_bootpart}  — partition where boot.scr was found (1)
-  #   ${filesize}         — updated by each ext4load; use after the last load
+  # Load addresses are set explicitly for 64 MB DRAM (base 0x40000000):
+  #
+  #   0x40200000  kernel_addr_r    (2 MB above base — avoids SPL/U-Boot area)
+  #   0x41E00000  fdt_addr_r       (30 MB above base — a few KB, between K+R)
+  #   0x42000000  ramdisk_addr_r   (32 MB above base — 32 MB for initramfs)
+  #
+  # Without explicit overrides, U-Boot's default ramdisk_addr_r for QEMU ARM
+  # is 0x44000000 — exactly at the 64 MB boundary — which causes QEMU's
+  # virtio-blk DMA to fault ("bogus descriptor or out of resources").
+  #
+  # Uses distro_bootcmd environment variables for device portability:
+  #   ''${devtype}         — "mmc" (real hardware) or "virtio" (QEMU)
+  #   ''${devnum}          — device index (0 for the first device)
+  #   ''${distro_bootpart} — partition where boot.scr was found (1)
+  #   ''${filesize}        — updated by each ext4load; pass after last load
   abBootScript = pkgs.writeText "ab-boot-script.txt" ''
     echo "A/B squashfs boot: loading kernel + initramfs from partition 1"
+    setenv kernel_addr_r  0x40200000
+    setenv fdt_addr_r     0x41E00000
+    setenv ramdisk_addr_r 0x42000000
     setenv bootargs "${config.boot.cmdline}"
     ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r} /zImage
     ${lib.optionalString (config.device.dtb != null) ''
@@ -161,7 +175,19 @@ PYEOF
     dd if=mbr.bin of=$out/sd-flashable.img bs=1 conv=notrunc 2>/dev/null
 
     # ── Build boot partition (p1): kernel + initramfs + boot.scr ────────────
-    mkdir -p boot-staging/extlinux
+    #
+    # No extlinux/extlinux.conf is created here.  U-Boot 2026.01 scans boot
+    # methods in priority order: extlinux (seq 1) beats script/boot.scr (seq 2).
+    # If extlinux.conf is present, U-Boot uses it and applies its default
+    # ramdisk_addr_r (0x44000000 on QEMU ARM) — exactly at the 64 MB boundary —
+    # causing a virtio DMA fault before the kernel even starts.
+    #
+    # boot.scr (script bootmeth) explicitly sets 64 MB-safe load addresses:
+    #   kernel_addr_r  0x40200000
+    #   fdt_addr_r     0x41E00000
+    #   ramdisk_addr_r 0x42000000
+    # Keeping extlinux.conf absent forces U-Boot to fall through to boot.scr.
+    mkdir -p boot-staging
 
     ${lib.optionalString (config.device.kernel != null) ''
       cp ${config.device.kernel} boot-staging/zImage
@@ -174,19 +200,9 @@ PYEOF
     cp ${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz \
        boot-staging/initramfs-slotselect.cpio.gz
 
-    # Compiled U-Boot boot script (primary boot path).
+    # Compiled U-Boot boot script — the sole boot path for A/B images.
     mkimage -A arm -O linux -T script -C none -a 0 -e 0 \
       -n "A/B squashfs boot" -d ${abBootScript} boot-staging/boot.scr
-
-    # extlinux.conf fallback (used if boot.scr fails or is not found first).
-    cat > boot-staging/extlinux/extlinux.conf << EXTEOF
-LABEL linux
-  KERNEL /zImage
-${lib.optionalString (config.device.dtb != null)
-  "  FDT /${config.device.name}.dtb"}
-  INITRD /initramfs-slotselect.cpio.gz
-  APPEND ${config.boot.cmdline}
-EXTEOF
 
     BOOT_SIZE_BYTES=$(( BOOT_SIZE_SECTORS * 512 ))
     truncate -s $BOOT_SIZE_BYTES boot.img

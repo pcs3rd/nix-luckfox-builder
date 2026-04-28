@@ -618,6 +618,33 @@ with lib;
           simple dependency chains.
         '';
       };
+
+      swapSize = mkOption {
+        type        = types.int;
+        default     = 0;
+        description = ''
+          Size in MiB of a persistent swap file created in the persist partition.
+          0 (default) disables disk-backed swap entirely.
+
+          When non-zero, the slot-select initramfs creates /persist/swapfile on
+          first boot (using dd + mkswap), then activates it with swapon.  Because
+          the persist partition mount persists inside the kernel VFS through
+          switch_root, the swap stays active for the full lifetime of the system
+          without any userspace service.  No extra partition is needed.
+
+          Suggested sizes:
+            128 — light safety net alongside system.zram
+            256 — general-purpose fallback swap
+            512 — memory-intensive workloads
+
+          Tip: combine with system.zram (lz4 compressed RAM swap) for a two-tier
+          hierarchy: zram absorbs bursts cheaply; disk swap handles sustained
+          pressure.  With zram enabled, the disk swap will rarely be hit.
+
+          Note: disk swap on SD cards is slow and wears the card over time.
+          Prefer system.zram for latency-sensitive workloads.
+        '';
+      };
     };
 
     system.build = {
