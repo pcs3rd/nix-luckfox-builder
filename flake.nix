@@ -110,6 +110,15 @@
             # native hardware becomes ~90 seconds in TCG emulation.
             MMC             = lib.mkForce no;
 
+            # ── PCI: not used — all QEMU virtio devices are virtio-mmio ─────────
+            # QEMU -M virt exposes a PCIe root complex in the device tree.
+            # The kernel scans all PCI bus/device/function slots looking for
+            # devices — thousands of MMIO reads in TCG, each one taking orders
+            # of magnitude longer than on real hardware.
+            # Our virtio-blk, virtio-net, and virtio-rng are -device virtio-*-device
+            # (mmio transport), not -device virtio-*-pci.  PCI is entirely unused.
+            PCI             = lib.mkForce no;
+
             # ── Kernel debug / tracing overhead ────────────────────────────
             FTRACE          = lib.mkForce no;
             KPROBES         = lib.mkForce no;
@@ -466,7 +475,8 @@ RUNEOF
             -nographic \
             -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
             -device virtio-net-device,netdev=net0 \
-            -device virtio-rng-device
+            -object rng-random,id=rng0,filename=/dev/urandom \
+            -device virtio-rng-device,rng=rng0
         '';
       };
 
@@ -552,7 +562,8 @@ RUNEOF
             -nographic \
             -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
             -device virtio-net-device,netdev=net0 \
-            -device virtio-rng-device
+            -object rng-random,id=rng0,filename=/dev/urandom \
+            -device virtio-rng-device,rng=rng0
         '';
       };
 
