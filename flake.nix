@@ -429,7 +429,7 @@ RUNEOF
           fi
 
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  Luckfox Pico Mini B — QEMU A/B rootfs test (ARMv7 / 64 MB)"
+          echo "  Luckfox Pico Mini B — QEMU A/B rootfs test (ARMv7 / 128 MB)"
           echo "  Boot: U-Boot (-bios) → boot.scr → slot indicator → root=LABEL=…"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  Serial console below  (Ctrl-A X to quit QEMU)"
@@ -447,7 +447,7 @@ RUNEOF
             -M virt \
             -cpu cortex-a7 \
             -smp 1 \
-            -m 64M \
+            -m 128M \
             -bios ${hostPkgs.pkgsCross.armv7l-hf-multiplatform.ubootQemuArm}/u-boot.bin \
             -drive "file=$OVERLAY,format=qcow2,if=virtio" \
             -nographic \

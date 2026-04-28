@@ -78,7 +78,15 @@ let
       ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r} /${config.device.name}.dtb
     ''}ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
     echo "bootargs: ''${bootargs}"
-    bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
+    ${if config.device.dtb != null then ''
+      bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
+    '' else ''
+      # No board DTB in the boot partition (e.g. QEMU).  Use the FDT that
+      # the prior boot stage (QEMU) passed to U-Boot.  U-Boot stores it at
+      # ${fdtcontroladdr} — this is the complete virt-machine device tree
+      # including memory, virtio devices, UART, etc.
+      bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdtcontroladdr}
+    ''}
   '';
 in
 

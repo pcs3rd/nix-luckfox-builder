@@ -63,6 +63,13 @@
   system.abRootfs.enable = true;
 
   # 2048 MiB disk → p1=64 MiB boot, p2/p3=~863 MiB each, p4=256 MiB persist.
-  # RAM = 64 MB (matching real hardware); zram is disabled (no kernel modules).
+  #
+  # RAM = 128 MB for QEMU A/B (real hardware uses 64 MB).
+  # QEMU virt places its machine FDT at RAM_BASE + RAM_SIZE/2.  With 64 MB that
+  # is 0x40000000 + 0x2000000 = 0x42000000 — exactly the same address used by
+  # ramdisk_addr_r in boot.scr.  U-Boot marks it reserved and refuses to load
+  # the initramfs ("Reading file would overwrite reserved memory").
+  # 128 MB moves the FDT to 0x44000000, safely above our load range.
+  # Zram is disabled — no kernel modules in the QEMU initramfs.
   system.imageSize = lib.mkDefault 2048;
 }
