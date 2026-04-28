@@ -97,6 +97,19 @@
             FUSE_FS         = lib.mkForce no;   # remove if you need FUSE tools
             NTFS_FS         = lib.mkForce no;
 
+            # ── virtio-rng: built-in so the RNG has entropy before any modules ──
+            # If this is =m (modular), the virtio-rng device exists but the
+            # driver isn't loaded in early init.  Some crypto subsystems block
+            # waiting for the RNG to be seeded.  Force =y to avoid the stall.
+            HW_RANDOM_VIRTIO = yes;
+
+            # ── MMC / SDIO: not present on QEMU virt (disk is virtio-blk) ──────
+            # The multi-platform nixpkgs kernel enables MMC by default.
+            # mmc_rescan probes for controllers that don't exist in QEMU virt,
+            # times out, and can retry many times — each timeout ~100ms on
+            # native hardware becomes ~90 seconds in TCG emulation.
+            MMC             = lib.mkForce no;
+
             # ── Kernel debug / tracing overhead ────────────────────────────
             FTRACE          = lib.mkForce no;
             KPROBES         = lib.mkForce no;
@@ -474,10 +487,23 @@ RUNEOF
         name = "qemu-ab-kvm-luckfox";
         runtimeInputs = with hostPkgs; [ qemu python3 ];
         text = ''
+          # KVM can only accelerate guests whose ISA matches the host.
+          # qemu-system-arm + -enable-kvm requires an ARM or AArch64 host;
+          # on x86_64, /dev/kvm exists but accelerates only x86 guests.
+          HOST_ARCH=$(uname -m)
+          case "$HOST_ARCH" in
+            aarch64|armv7l|armv8l) : ;;   # ARM host — KVM can accelerate ARM guests
+            *)
+              echo "qemu-ab-kvm: KVM cannot accelerate ARM guests on a $HOST_ARCH host." >&2
+              echo "  KVM is ISA-specific: only ARM/AArch64 hosts can KVM-accelerate ARM VMs." >&2
+              echo "  Use software emulation instead:  nix run .#qemu-ab" >&2
+              exit 1
+              ;;
+          esac
+
           if [ ! -e /dev/kvm ]; then
-            echo "qemu-ab-kvm: /dev/kvm not found — KVM is unavailable on this host." >&2
-            echo "  Load kvm_intel or kvm_amd and ensure your user is in the kvm group." >&2
-            echo "  Fall back to software emulation with:  nix run .#qemu-ab" >&2
+            echo "qemu-ab-kvm: /dev/kvm not found." >&2
+            echo "  Load kvm or kvm_host and ensure your user is in the kvm group." >&2
             exit 1
           fi
 
