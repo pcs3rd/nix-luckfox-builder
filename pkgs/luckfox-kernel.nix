@@ -41,7 +41,10 @@ let
   LUCKFOX_REV    = "438d5270a38c59a74f142dfa31ffbf51b096ce72";
   LUCKFOX_SHA256 = "sha256-iPmQLKzgznBp3CJMvbbGrtLgd9P0jHgBrynqGnsAygI=";
 
-  KERNEL_DEFCONFIG = "luckfox_pico_mini_b_defconfig";
+  # The SDK for this revision ships rv1106_defconfig as the base config.
+  # (luckfox_pico_mini_b_defconfig does not exist in this tree — confirmed by
+  # inspecting arch/arm/configs/ during the first build attempt.)
+  KERNEL_DEFCONFIG = "rv1106_defconfig";
 
   # In a Nix cross stdenv, pkgs.stdenv.cc is the cross-compiler wrapper
   # (target = armv7l musl).  pkgs.buildPackages.stdenv.cc is the native
@@ -110,6 +113,32 @@ let
     printf "000000\n"
   '';
 
+  # gcc-wrapper.py passthrough — the SDK ships a Python shim that locates the
+  # bundled Rockchip cross-toolchain.  In a Nix sandbox the toolchain is on
+  # PATH already, so we just exec the real compiler transparently.
+  #
+  # Called as:  scripts/gcc-wrapper.py <compiler> [args...]
+  # Effect:     exec <compiler> [args...]   (first arg becomes argv[0])
+  #
+  # This is safer than patching every Makefile/Kconfig call site because the
+  # wrapper is invoked from multiple places (Makefile CC=, init/Kconfig shell
+  # expansions, scripts/Makefile.compiler, etc.).
+  gccWrapperPy = builtins.toFile "gcc-wrapper.py" ''
+    #!/usr/bin/env python3
+    """Passthrough: exec the first argument with the remaining arguments.
+
+    The Luckfox SDK calls this as:
+        scripts/gcc-wrapper.py $(CROSS_COMPILE)gcc [flags...]
+    We simply exec the real compiler so all flag/version queries work normally.
+    """
+    import os, sys
+    if len(sys.argv) < 2:
+        # Called with no compiler — nothing to do.
+        sys.exit(0)
+    compiler = sys.argv[1]
+    os.execv(compiler, sys.argv[1:])
+  '';
+
 in
 
 pkgs.stdenv.mkDerivation {
@@ -148,9 +177,14 @@ pkgs.stdenv.mkDerivation {
   # unconditional and cannot be skipped or mis-ordered the way a shell heredoc
   # inside configurePhase can be.
   postPatch = ''
-    # Replace SDK build scripts that call the bundled gcc-wrapper.py shim.
-    # The shim is not present in the Nix sandbox; these replacements talk to
-    # the cross-compiler directly.
+    # Install a passthrough gcc-wrapper.py so every SDK call site works.
+    # The SDK calls this from Makefile CC=, init/Kconfig shell expansions,
+    # and possibly scripts/Makefile.compiler — patching all those is fragile.
+    # A working passthrough is simpler: it just execs the real compiler.
+    cp ${gccWrapperPy} scripts/gcc-wrapper.py
+    chmod +x scripts/gcc-wrapper.py
+
+    # Replace the other SDK build scripts that also break in the Nix sandbox.
     cp ${gccVersionSh} scripts/gcc-version.sh
     chmod +x scripts/gcc-version.sh
 
@@ -160,16 +194,7 @@ pkgs.stdenv.mkDerivation {
     cp ${clangVersionSh} scripts/clang-version.sh
     chmod +x scripts/clang-version.sh
 
-    # The SDK top-level Makefile overrides CC to:
-    #   CC = scripts/gcc-wrapper.py $(CROSS_COMPILE)gcc
-    # Strip the wrapper so CC becomes the bare cross-compiler.  This means
-    # gcc-version.sh receives a single real compiler path, not a
-    # "scripts/gcc-wrapper.py /nix/store/..." pair.  The gcc-version.sh
-    # last-arg logic handles either form, but removing the wrapper also fixes
-    # any other scripts that unconditionally treat $1 as the compiler.
-    sed -i 's|scripts/gcc-wrapper\.py ||g' Makefile || true
-
-    echo "patched scripts/gcc-version.sh, scripts/ld-version.sh, scripts/clang-version.sh, Makefile"
+    echo "patched: gcc-wrapper.py gcc-version.sh ld-version.sh clang-version.sh"
   '';
 
   configurePhase = ''
