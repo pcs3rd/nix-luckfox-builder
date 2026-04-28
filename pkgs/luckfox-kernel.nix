@@ -9,7 +9,7 @@
 #   $out/dtbs/               — all board-relevant device tree blobs
 #   $out/lib/modules/<ver>/  — kernel modules (for `modprobe`)
 #
-# ── Usage in hardware/pico-mini-b.nix ────────────────────────────────────────
+# ── Usage in hardware/pico-mini-b-kernel.nix ─────────────────────────────────
 #
 #   { pkgs, ... }:
 #   let kernel = import ../pkgs/luckfox-kernel.nix { inherit pkgs; };
@@ -49,6 +49,48 @@ let
   crossCompile = "${pkgs.stdenv.cc}/bin/${pkgs.stdenv.cc.targetPrefix}";
   hostCC       = "${pkgs.buildPackages.stdenv.cc}/bin/gcc";
 
+  # ── Replacement build scripts ────────────────────────────────────────────────
+  #
+  # The Luckfox/Rockchip SDK kernel ships a custom scripts/gcc-version.sh that
+  # delegates to scripts/gcc-wrapper.py — a Python shim designed for the SDK's
+  # bundled cross-toolchain (arm-rockchip820-linux-uclibcgnueabihf-gcc).
+  # When building with Nix's cross-compiler the wrapper cannot locate the SDK
+  # GCC, returns empty strings, and causes Kconfig to abort with
+  # "init/Kconfig: syntax error".
+  #
+  # Fix: replace gcc-version.sh with the standard Linux kernel version that
+  # queries the compiler directly via preprocessor macro expansion.
+  #
+  # builtins.toFile creates these as read-only Nix store objects at evaluation
+  # time.  postPatch copies them into the (writable) build tree before any
+  # make invocation, bypassing the SDK's gcc-wrapper.py entirely.
+  #
+  # Note: $compiler, $*, $LD, etc. are shell variables in the generated files —
+  # they use plain $ (no braces) so Nix does not interpolate them.
+  gccVersionSh = builtins.toFile "gcc-version.sh" ''
+    #!/bin/sh
+    # Standard gcc-version.sh — queries the compiler directly.
+    # Called by the kernel Makefile as:  gcc-version.sh $(CC)
+    if [ -z "$*" ]; then echo "Usage: gcc-version.sh <compiler>" >&2; exit 1; fi
+    compiler="$*"
+    MAJOR=$(echo __GNUC__            | $compiler -E -x c - | tail -1)
+    MINOR=$(echo __GNUC_MINOR__      | $compiler -E -x c - | tail -1)
+    PATCH=$(echo __GNUC_PATCHLEVEL__ | $compiler -E -x c - | tail -1)
+    printf "%02d%02d%02d\n" "$MAJOR" "$MINOR" "$PATCH"
+  '';
+
+  ldVersionSh = builtins.toFile "ld-version.sh" ''
+    #!/bin/sh
+    # Standard ld-version.sh — compatible with binutils ld.
+    # Called by the kernel Makefile as:  ld-version.sh $(LD)
+    if [ -z "$*" ]; then echo "Usage: ld-version.sh <ld>" >&2; exit 1; fi
+    LD="$*"
+    LD_V=$($LD --version | head -1 | sed 's/.*\b\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/')
+    MAJOR=$(echo "$LD_V" | cut -d. -f1)
+    MINOR=$(echo "$LD_V" | cut -d. -f2)
+    printf "%02d%02d\n" "$MAJOR" "$MINOR"
+  '';
+
 in
 
 pkgs.stdenv.mkDerivation {
@@ -80,47 +122,23 @@ pkgs.stdenv.mkDerivation {
 
   enableParallelBuilding = true;
 
-  configurePhase = ''
-    # ── Patch SDK build scripts for Nix cross-compiler compatibility ──────────
-    #
-    # The Luckfox/Rockchip SDK kernel ships a custom scripts/gcc-version.sh
-    # that delegates to scripts/gcc-wrapper.py — a Python shim designed for the
-    # SDK's bundled cross-toolchain (arm-rockchip820-linux-uclibcgnueabihf-gcc).
-    # When building with Nix's cross-compiler the wrapper can't locate the SDK
-    # GCC, returns empty strings, and causes Kconfig to abort with
-    # "init/Kconfig: syntax error".
-    #
-    # Fix: replace gcc-version.sh with the standard Linux kernel version that
-    # queries the compiler directly via preprocessor macro expansion, and supply
-    # ld-version.sh if it is missing from the SDK tree.
-
-    cat > scripts/gcc-version.sh << 'GCCEOF'
-#!/bin/sh
-# Standard gcc-version.sh — compatible with any GCC cross-compiler.
-if [ -z "$*" ]; then echo "Usage: gcc-version.sh <compiler>" >&2; exit 1; fi
-compiler="$*"
-MAJOR=$(echo __GNUC__            | $compiler -E -x c - | tail -1)
-MINOR=$(echo __GNUC_MINOR__      | $compiler -E -x c - | tail -1)
-PATCH=$(echo __GNUC_PATCHLEVEL__ | $compiler -E -x c - | tail -1)
-printf "%02d%02d%02d\n" "$MAJOR" "$MINOR" "$PATCH"
-GCCEOF
+  # ── Patch phase: replace SDK build scripts before any make invocation ─────
+  #
+  # postPatch runs after the source is unpacked, in the sourceRoot directory
+  # (source/sysdrv/source/kernel).  Copying from the Nix store here is
+  # unconditional and cannot be skipped or mis-ordered the way a shell heredoc
+  # inside configurePhase can be.
+  postPatch = ''
+    cp ${gccVersionSh} scripts/gcc-version.sh
     chmod +x scripts/gcc-version.sh
 
-    # ld-version.sh may be absent in older Rockchip SDK kernel trees.
-    if [ ! -x scripts/ld-version.sh ]; then
-      cat > scripts/ld-version.sh << 'LDEOF'
-#!/bin/sh
-# Standard ld-version.sh — compatible with binutils ld.
-if [ -z "$*" ]; then echo "Usage: ld-version.sh <ld>" >&2; exit 1; fi
-LD="$*"
-LD_V=$($LD --version | head -1 | sed 's/.*\b\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/')
-MAJOR=$(echo "$LD_V" | cut -d. -f1)
-MINOR=$(echo "$LD_V" | cut -d. -f2)
-printf "%02d%02d\n" "$MAJOR" "$MINOR"
-LDEOF
-      chmod +x scripts/ld-version.sh
-    fi
+    cp ${ldVersionSh} scripts/ld-version.sh
+    chmod +x scripts/ld-version.sh
 
+    echo "patched scripts/gcc-version.sh and scripts/ld-version.sh"
+  '';
+
+  configurePhase = ''
     echo "=== available ARM defconfigs ==="
     ls arch/arm/configs/ | grep -iE 'luckfox|rv110[36]' || true
 
@@ -139,10 +157,9 @@ LDEOF
     # Append overrides then re-validate with olddefconfig so Kconfig resolves
     # any inter-option dependencies.  Options absent from this kernel version
     # are silently ignored by olddefconfig.
-    # Pipe the heredoc through sed to strip leading whitespace before appending.
-    # Nix indented strings (the "two single-quote" form) cannot strip indentation
-    # when the closing delimiter is at column 0, so we strip manually with sed.
-    # Kconfig requires lines like "CONFIG_FOO=y" with no leading whitespace.
+    #
+    # The sed strips leading whitespace so Kconfig sees "CONFIG_FOO=y" with
+    # no indentation (required format).
     sed 's/^[[:space:]]*//' >> .config << 'SIZECFG'
     # Camera / ISP / media — hardware ISP present on RV1103 but unused here.
     CONFIG_MEDIA_SUPPORT=n
@@ -203,13 +220,11 @@ SIZECFG
     # ── Device tree blobs ─────────────────────────────────────────────────────
     # Collect board-relevant DTBs; fall back to copying everything if the
     # pattern matches nothing (e.g. if the board DTS is named differently).
-    FOUND=0
     find arch/arm/boot/dts -maxdepth 1 -name "*.dtb" | while read dtb; do
       name=$(basename "$dtb")
       case "$name" in
         *luckfox*|*rv1103*|*rv1106*)
           cp "$dtb" $out/dtbs/"$name"
-          FOUND=1
           ;;
       esac
     done
