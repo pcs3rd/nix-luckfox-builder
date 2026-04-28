@@ -457,6 +457,79 @@ RUNEOF
         '';
       };
 
+      # ── QEMU A/B launcher with KVM acceleration ──────────────────────────────
+      #
+      # Identical to qemu-ab but adds -enable-kvm for hardware-accelerated
+      # emulation on Linux hosts with KVM support (/dev/kvm must be accessible).
+      # Boot time drops from minutes (TCG) to a few seconds (KVM).
+      #
+      # KVM requires:
+      #   - Linux host with the kvm_intel or kvm_amd kernel module loaded
+      #   - User in the 'kvm' group (or /dev/kvm accessible)
+      #   - NOT available on macOS / Windows / inside most VMs
+      #
+      # Usage:  nix run .#qemu-ab-kvm
+      #         nix run .#qemu-ab-kvm -- --reset
+      qemu-ab-kvm = hostPkgs.writeShellApplication {
+        name = "qemu-ab-kvm-luckfox";
+        runtimeInputs = with hostPkgs; [ qemu python3 ];
+        text = ''
+          if [ ! -e /dev/kvm ]; then
+            echo "qemu-ab-kvm: /dev/kvm not found — KVM is unavailable on this host." >&2
+            echo "  Load kvm_intel or kvm_amd and ensure your user is in the kvm group." >&2
+            echo "  Fall back to software emulation with:  nix run .#qemu-ab" >&2
+            exit 1
+          fi
+
+          SSH_PORT=$(python3 -c \
+            "import socket; s=socket.socket(); s.bind((\"\",0)); \
+             print(s.getsockname()[1]); s.close()")
+
+          # Shares the same persistent overlay as qemu-ab so slot state is
+          # preserved regardless of which runner you use.
+          OVERLAY="$HOME/.cache/luckfox-ab.qcow2"
+          mkdir -p "$(dirname "$OVERLAY")"
+
+          if [ "''${1:-}" = "--reset" ] || [ ! -f "$OVERLAY" ]; then
+            echo "qemu-ab-kvm: (re)creating overlay at $OVERLAY"
+            qemu-img create -f qcow2 \
+              -b ${qemu-ab-disk}/sd-flashable.img \
+              -F raw "$OVERLAY" > /dev/null
+          else
+            echo "qemu-ab-kvm: reusing existing overlay at $OVERLAY"
+            echo "             (pass --reset to start fresh from slot A)"
+          fi
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Luckfox Pico Mini B — QEMU A/B + KVM (ARMv7 / 128 MB)"
+          echo "  Boot: U-Boot (-bios) → boot.scr → slot indicator → overlayfs"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Serial console below  (Ctrl-A X to quit QEMU)"
+          echo "  SSH: ssh root@localhost -p ''${SSH_PORT}"
+          echo ""
+          echo "  Test A/B upgrade:"
+          echo "    nix build .#qemu-ab-rootfs"
+          echo "    ssh root@localhost -p ''${SSH_PORT} upgrade < result/rootfs.squashfs"
+          echo ""
+          echo "  Slot changes and upgrades persist in: $OVERLAY"
+          echo "  Run with --reset to wipe the overlay and start from slot A"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          qemu-system-arm \
+            -M virt \
+            -cpu cortex-a7 \
+            -enable-kvm \
+            -smp 1 \
+            -m 128M \
+            -bios ${hostPkgs.pkgsCross.armv7l-hf-multiplatform.ubootQemuArm}/u-boot.bin \
+            -drive "file=$OVERLAY,format=qcow2,if=virtio" \
+            -nographic \
+            -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
+            -device virtio-net-device,netdev=net0 \
+            -device virtio-rng-device
+        '';
+      };
+
     in {
       packages = {
         # Real hardware outputs
@@ -491,10 +564,12 @@ RUNEOF
         qemu-vm           = qemu-vm;
 
         # A/B rootfs QEMU test — squashfs + overlayfs boot path in a VM.
-        # nix run .#qemu-ab                     — launch the VM
+        # nix run .#qemu-ab                     — launch the VM (TCG, works everywhere)
+        # nix run .#qemu-ab-kvm                 — KVM-accelerated (Linux + /dev/kvm only)
         # nix build .#qemu-ab-disk              — the raw A/B disk image
         # nix build .#qemu-ab-rootfs            — standalone squashfs for upgrade testing
         qemu-ab           = qemu-ab;
+        qemu-ab-kvm       = qemu-ab-kvm;
         qemu-ab-disk      = qemu-ab-disk;
         qemu-ab-rootfs    = qemu-ab-rootfs;
       };
@@ -515,6 +590,10 @@ RUNEOF
         qemu-ab = {
           type    = "app";
           program = "${qemu-ab}/bin/qemu-ab-luckfox";
+        };
+        qemu-ab-kvm = {
+          type    = "app";
+          program = "${qemu-ab-kvm}/bin/qemu-ab-kvm-luckfox";
         };
       };
 
