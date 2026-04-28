@@ -82,9 +82,9 @@ let
       bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
     '' else ''
       # No board DTB in the boot partition (e.g. QEMU).  Use the FDT that
-      # the prior boot stage (QEMU) passed to U-Boot.  U-Boot stores it at
-      # ${fdtcontroladdr} — this is the complete virt-machine device tree
-      # including memory, virtio devices, UART, etc.
+      # the prior boot stage (QEMU) passed to U-Boot.  U-Boot exports it as
+      # ''${fdtcontroladdr} — the complete virt-machine device tree including
+      # memory map, virtio devices, UART, etc.
       bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdtcontroladdr}
     ''}
   '';
