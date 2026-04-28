@@ -90,9 +90,13 @@ let
       # because that address is already allocated.
       #
       # Fix: copy the control FDT to fdt_addr_r (0x41E00000) — free RAM between
-      # the kernel and the QEMU machine FDT.  128 KB is ample for the QEMU virt
-      # device tree.  After fdt move, bootz can freely reserve fdt_addr_r.
-      fdt move ''${fdtcontroladdr} ''${fdt_addr_r} 0x20000
+      # the kernel and the initramfs.  QEMU allocates exactly 1 MB (0x100000)
+      # for the virt machine FDT regardless of actual content size; fdt move
+      # checks the FDT header's declared total size against the length arg and
+      # aborts if len < fdt_totalsize.  0x100000 satisfies QEMU's declared size;
+      # fdt_addr_r + 0x100000 = 0x41F00000 is 1 MB below the initramfs at
+      # ramdisk_addr_r = 0x42000000, so there is no overlap.
+      fdt move ''${fdtcontroladdr} ''${fdt_addr_r} 0x100000
       bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
     ''}
   '';
