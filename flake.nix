@@ -119,6 +119,13 @@
             # (mmio transport), not -device virtio-*-pci.  PCI is entirely unused.
             PCI             = lib.mkForce no;
 
+            # ── Crypto subsystem self-tests ─────────────────────────────────
+            # Every registered cipher/hash/AEAD algorithm runs a test suite
+            # during do_initcalls().  With dozens of algorithms registered in
+            # the multi-platform config, this adds many seconds of real-hardware
+            # time — multiplied by TCG slowdown into many minutes.
+            CRYPTO_MANAGER_DISABLE_TESTS = yes;
+
             # ── Kernel debug / tracing overhead ────────────────────────────
             FTRACE          = lib.mkForce no;
             KPROBES         = lib.mkForce no;

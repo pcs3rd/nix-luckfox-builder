@@ -49,7 +49,7 @@
   # quiet: suppresses per-driver kernel log spam.  The PL011 UART in QEMU TCG
   # is slow per-character — printing thousands of driver log lines measurably
   # extends boot time.  Remove quiet to see driver output for debugging.
-  boot.cmdline = lib.mkForce "console=ttyAMA0 init=/sbin/init panic=1 initcall_debug loglevel=8 random.trust_bootloader=on";
+  boot.cmdline = lib.mkForce "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 init=/sbin/init panic=1 initcall_debug loglevel=8 random.trust_bootloader=on";
 
   # U-Boot is supplied via -bios, not embedded in the disk image.
   boot.uboot.enable = lib.mkForce false;
