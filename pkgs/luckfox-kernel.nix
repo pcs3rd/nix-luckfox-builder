@@ -47,13 +47,15 @@ let
   KERNEL_DEFCONFIG = "rv1106_defconfig";
 
   # In a Nix cross stdenv, pkgs.stdenv.cc is the cross-compiler wrapper
-  # (target = armv7l musl).  For host-side build tools (fixdep, conf, etc.)
-  # we need a native GCC explicitly — buildPackages.stdenv.cc may be clang
-  # on systems where clang is the default, and clang wrappers don't expose
-  # a 'gcc' binary.  Pin to buildPackages.gcc to always get real GCC.
+  # (target = armv7l musl).  pkgs.buildPackages.stdenv.cc is the native
+  # compiler wrapper for the build machine — may be GCC or clang.
+  #
+  # Use '/bin/cc' rather than '/bin/gcc': every Nixpkgs compiler wrapper
+  # (both GCC and clang variants) provides a 'cc' entry point, while clang
+  # wrappers don't expose 'gcc' and cross-compiler GCC wrappers only expose
+  # the prefixed form (e.g. armv7l-...-gcc, not bare gcc).
   crossCompile = "${pkgs.stdenv.cc}/bin/${pkgs.stdenv.cc.targetPrefix}";
-  hostGCC      = pkgs.buildPackages.gcc;
-  hostCC       = "${hostGCC}/bin/gcc";
+  hostCC       = "${pkgs.buildPackages.stdenv.cc}/bin/cc";
 
   # ── Replacement build scripts ────────────────────────────────────────────────
   #
@@ -169,9 +171,10 @@ pkgs.stdenv.mkDerivation {
     pkg-config
     # dtc is required for `make dtbs`
     dtc
-    # Explicit GCC for HOSTCC — stdenv.cc may be clang on some hosts and
-    # clang wrappers don't expose a 'gcc' binary that the kernel Makefiles expect.
-    hostGCC
+    # glibc.dev provides <elf.h>, needed by scripts/sorttable (a host tool).
+    # The Nix sandbox has no /usr/include; glibc.dev injects the include path
+    # into NIX_CFLAGS_COMPILE_FOR_BUILD, which the HOSTCC cc-wrapper picks up.
+    glibc.dev
   ];
 
   enableParallelBuilding = true;
@@ -226,10 +229,16 @@ pkgs.stdenv.mkDerivation {
     echo "=== available ARM defconfigs ==="
     ls arch/arm/configs/ | grep -iE 'luckfox|rv110[36]' || true
 
+    # HOSTCFLAGS must include glibc headers so host tools (fixdep, sorttable,
+    # etc.) can find <elf.h> and other system headers.  The Nix sandbox has no
+    # /usr/include; we inject the path explicitly here and in buildPhase.
+    hostcflags="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -I${pkgs.buildPackages.glibc.dev}/include"
+
     make \
       ARCH=arm \
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
+      HOSTCFLAGS="$hostcflags" \
       ${KERNEL_DEFCONFIG}
 
     # ── Size reduction: disable large unused subsystems ──────────────────────
@@ -286,6 +295,7 @@ SIZECFG
       ARCH=arm \
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
+      HOSTCFLAGS="$hostcflags" \
       olddefconfig
   '';
 
@@ -305,6 +315,7 @@ SIZECFG
       ARCH=arm \
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
+      HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -I${pkgs.buildPackages.glibc.dev}/include" \
       KCFLAGS="-Wno-dangling-pointer -Wno-array-parameter -Wno-use-after-free" \
       zImage dtbs modules
   '';

@@ -31,10 +31,13 @@ let
   #
   # pkgs.stdenv.cc           — cross-compiler wrapper (target = armv7l musl)
   # pkgs.stdenv.cc.targetPrefix — "armv7l-unknown-linux-musleabihf-"
-  # pkgs.buildPackages.gcc   — native GCC (explicit: stdenv.cc may be clang)
+  # pkgs.buildPackages.stdenv.cc — native compiler wrapper (build machine)
+  #
+  # Use '/bin/cc' not '/bin/gcc': every Nixpkgs wrapper exposes 'cc', but
+  # clang wrappers have no 'gcc' and cross-GCC wrappers only expose the
+  # prefixed binary (armv7l-...-gcc), not bare 'gcc'.
   crossCompile = "${pkgs.stdenv.cc}/bin/${pkgs.stdenv.cc.targetPrefix}";
-  hostGCC      = pkgs.buildPackages.gcc;
-  hostCC       = "${hostGCC}/bin/gcc";
+  hostCC       = "${pkgs.buildPackages.stdenv.cc}/bin/cc";
 
 in
 
@@ -62,9 +65,6 @@ pkgs.stdenv.mkDerivation {
     pkg-config
     bc          # scripts/Makefile.spl uses bc to compute SPL pad size
     patchelf    # needed to fix the ELF interpreter on rkbin proprietary tools
-    # Explicit GCC for HOSTCC — stdenv.cc may be clang on some hosts, and
-    # clang wrappers don't expose a 'gcc' binary that U-Boot's Makefiles expect.
-    hostGCC
   ];
 
   configurePhase = ''
