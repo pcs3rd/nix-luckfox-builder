@@ -54,11 +54,16 @@
 #   nix build .#rootfsPartition         # produces result/rootfs.squashfs
 #   ssh root@device upgrade < result/rootfs.squashfs
 #
+#   With SHA1 verification (recommended — detects corruption or truncation):
+#   SHA=$(sha1sum result/rootfs.squashfs | awk '{print $1}')
+#   ssh root@device upgrade --sha1 "$SHA" < result/rootfs.squashfs
+#
 # On the device, /bin/upgrade:
 #   1. Reads current slot from the raw disk offset
-#   2. Writes new squashfs to the INACTIVE partition (dd from stdin)
-#   3. Atomically flips the slot byte on disk
-#   4. Reboots into the new slot
+#   2. Streams new squashfs to the INACTIVE partition while hashing in-flight
+#   3. Verifies SHA1 before touching the slot byte (aborts on mismatch)
+#   4. Atomically flips the slot byte on disk
+#   5. Reboots into the new slot
 #
 # The persist partition is NOT cleared on upgrade.  Each slot has its own
 # overlay directory, so upgrading to slot B starts with a fresh upper layer.
@@ -283,18 +288,73 @@ let
     #!/bin/sh
     #
     # upgrade — stream a new squashfs rootfs image from stdin to the inactive
-    #           slot, flip the slot indicator, and reboot.
+    #           slot, verify its integrity, flip the slot indicator, and reboot.
     #
     # From the build host:
     #   nix build .#rootfsPartition
     #   ssh root@device upgrade < result/rootfs.squashfs
     #
+    # With SHA1 verification (recommended):
+    #   SHA=$(sha1sum result/rootfs.squashfs | awk '{print $1}')
+    #   ssh root@device upgrade --sha1 "$SHA" < result/rootfs.squashfs
+    #
     # With compression (saves transfer bandwidth):
     #   gzip -c result/rootfs.squashfs | ssh root@device "gunzip | upgrade"
+    #   SHA=$(sha1sum result/rootfs.squashfs | awk '{print $1}')
+    #   gzip -c result/rootfs.squashfs | ssh root@device "gunzip | upgrade --sha1 $SHA"
 
     OFFSET="${toString cfg.slotOffset}"
+    EXPECTED_SHA1=""
 
-    # Refuse to run if stdin is a terminal — a squashfs image must be piped in.
+    # ── Parse arguments ───────────────────────────────────────────────────────
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --sha1)
+          shift
+          EXPECTED_SHA1="$1"
+          shift
+          ;;
+        --sha1=*)
+          EXPECTED_SHA1="''${1#--sha1=}"
+          shift
+          ;;
+        --help|-h)
+          echo "usage: upgrade [--sha1 <40-char-hex>]"
+          echo ""
+          echo "  Streams a squashfs rootfs from stdin to the inactive slot,"
+          echo "  verifies the SHA1 hash (if given), flips the slot, and reboots."
+          echo ""
+          echo "  --sha1 <hash>   Abort if the SHA1 of the received image does"
+          echo "                  not match.  The slot byte is NOT flipped on"
+          echo "                  mismatch — the running system stays intact."
+          exit 0
+          ;;
+        *)
+          echo "upgrade: unknown argument: $1" >&2
+          echo "usage: upgrade [--sha1 <40-char-hex>]" >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    # Validate the hash format if one was provided.
+    if [ -n "$EXPECTED_SHA1" ]; then
+      SHA1_LEN=$(printf '%s' "$EXPECTED_SHA1" | awk '{ print length }')
+      case "$EXPECTED_SHA1" in
+        *[!0-9a-fA-F]*)
+          echo "upgrade: error: --sha1 must contain only hex digits (0-9, a-f)" >&2
+          exit 1
+          ;;
+      esac
+      if [ "$SHA1_LEN" != 40 ]; then
+        echo "upgrade: error: --sha1 must be 40 hex characters (got $SHA1_LEN)" >&2
+        exit 1
+      fi
+      # Normalise to lower-case for comparison.
+      EXPECTED_SHA1=$(printf '%s' "$EXPECTED_SHA1" | tr 'A-F' 'a-f')
+    fi
+
+    # ── Refuse to run if stdin is a terminal ──────────────────────────────────
     if [ -t 0 ]; then
       echo "upgrade: error: no input — pipe a squashfs image into this command" >&2
       echo "  nix build .#rootfsPartition" >&2
@@ -302,19 +362,14 @@ let
       exit 1
     fi
 
-    # Locate the disk via the persist partition's ext4 label.
-    # Squashfs slot partitions have no filesystem label; the persist partition does.
+    # ── Locate disk via the persist partition's ext4 label ───────────────────
     PERSIST=$(findfs LABEL="${cfg.persistLabel}" 2>/dev/null)
-
     if [ -z "$PERSIST" ]; then
       echo "upgrade: error: no partition with LABEL=${cfg.persistLabel}" >&2
       exit 1
     fi
 
-    # Derive the whole-disk device from the persist partition path.
     DISK=$(echo "$PERSIST" | sed -E 's/p?[0-9]+$//')
-
-    # Slot partitions by number: p2 = slot A, p3 = slot B.
     case "$DISK" in
       *mmcblk* | *nvme*) SLOT_A="''${DISK}p2"; SLOT_B="''${DISK}p3" ;;
       *)                 SLOT_A="''${DISK}2";  SLOT_B="''${DISK}3"  ;;
@@ -327,11 +382,55 @@ let
     esac
 
     echo "upgrade: current=$CURRENT  next=$NEXT  target=$TARGET"
-    echo "upgrade: streaming squashfs from stdin — do not interrupt..."
 
-    dd of="$TARGET" bs=4M
+    # ── Stream image to the inactive slot (with optional in-flight hashing) ──
+    #
+    # When --sha1 is given, stdin is tee'd through a named FIFO to sha1sum
+    # running in the background, while the main flow goes to dd.  Both finish
+    # when stdin reaches EOF; we then compare hashes BEFORE flipping the slot
+    # byte, so a corrupt or truncated transfer leaves the running system intact.
+    #
+    # Named FIFO approach works on BusyBox:
+    #   sha1sum opens the FIFO for read (blocks until the write end is opened).
+    #   tee then opens the FIFO for write (unblocks sha1sum) and starts copying.
+    #   When tee closes, sha1sum sees EOF, finalises the digest, and exits.
+    HASH_FIFO=""
+    HASH_OUT=""
+
+    cleanup() {
+      [ -n "$HASH_FIFO" ] && rm -f "$HASH_FIFO" 2>/dev/null || true
+      [ -n "$HASH_OUT"  ] && rm -f "$HASH_OUT"  2>/dev/null || true
+    }
+    trap cleanup EXIT INT TERM
+
+    if [ -n "$EXPECTED_SHA1" ]; then
+      echo "upgrade: streaming and hashing — do not interrupt..."
+      HASH_FIFO="/tmp/upgrade-hash-fifo-$$"
+      HASH_OUT="/tmp/upgrade-hash-out-$$"
+      mkfifo "$HASH_FIFO"
+      sha1sum "$HASH_FIFO" > "$HASH_OUT" &
+      HASH_PID=$!
+      tee "$HASH_FIFO" | dd of="$TARGET" bs=4M
+      wait "$HASH_PID"
+
+      COMPUTED=$(awk '{ print $1 }' "$HASH_OUT" | tr 'A-F' 'a-f')
+
+      if [ "$COMPUTED" != "$EXPECTED_SHA1" ]; then
+        echo "upgrade: HASH MISMATCH — aborting" >&2
+        echo "  expected: $EXPECTED_SHA1" >&2
+        echo "  computed: $COMPUTED" >&2
+        echo "upgrade: slot NOT flipped — your running system is untouched" >&2
+        exit 1
+      fi
+      echo "upgrade: sha1 OK  ($COMPUTED)"
+    else
+      echo "upgrade: streaming squashfs from stdin — do not interrupt..."
+      dd of="$TARGET" bs=4M
+    fi
+
     sync
 
+    # ── Flip slot indicator ───────────────────────────────────────────────────
     echo "upgrade: activating slot $NEXT"
     printf '%s' "$NEXT" | dd of="$DISK" bs=1 seek="$OFFSET" conv=notrunc 2>/dev/null
     sync

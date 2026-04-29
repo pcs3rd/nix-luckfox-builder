@@ -39,6 +39,7 @@ NOR so the BOOT button is no longer needed.
 | [doc/hardware.md](doc/hardware.md) | Supported boards, kernel setup, build targets |
 | [doc/configuration.md](doc/configuration.md) | configuration.nix reference — USB, MCU, zram, networking, users |
 | [doc/services.md](doc/services.md) | Service options — SSH, getty, mesh-bbs, meshtasticd, nrfnet, companion-satellite |
+| [doc/updating.md](doc/updating.md) | Streaming firmware updates — SHA1 verification, netcat, rollback |
 | [doc/ab-rootfs.md](doc/ab-rootfs.md) | A/B rootfs — upgrade workflow, slot/upgrade/slot-share tools, fallback |
 | [doc/packages.md](doc/packages.md) | Package catalogue, adding packages, pinning versions |
 | [doc/qemu.md](doc/qemu.md) | QEMU test modes, A/B upgrade testing, reset |
