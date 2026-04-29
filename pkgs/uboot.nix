@@ -195,25 +195,10 @@ pkgs.stdenv.mkDerivation {
       cp u-boot.bin $out/u-boot.bin
     fi
 
-    # ── Rockchip USB download miniloader ─────────────────────────────────────
-    # This is the file rkdeveloptool db expects — a Rockchip-format binary with
-    # the "BOOT" magic header that initialises DRAM over USB and provides the
-    # USB flashing interface.  It is DIFFERENT from the SPL above:
-    #
-    #   SPL                    — goes ON the flash/SD card at sector 64
-    #   rv1106_miniloader.bin  — uploaded transiently via USB during flashing;
-    #                            never written to storage
-    #
-    # The miniloader lives in the rkbin tree alongside the DDR blob.
-    # Pick the highest version number if multiple exist.
-    miniloader=$(ls ../rkbin/bin/rv11/rv1106_miniloader_*.bin 2>/dev/null | sort -V | tail -1)
-    if [ -n "$miniloader" ]; then
-      echo "=== miniloader: $miniloader ==="
-      cp "$miniloader" $out/rv1106_miniloader.bin
-    else
-      echo "WARNING: no rv1106_miniloader_*.bin found in rkbin/bin/rv11/" >&2
-      echo "  rkdeveloptool db will need a miniloader from the Luckfox SDK" >&2
-    fi
+    # Note: rv1106_miniloader.bin is NOT copied here.
+    # It is fetched as a separate fetchurl derivation in flake.nix (rv1106Miniloader)
+    # because the pinned SDK revision does not include it in its rkbin directory.
+    # flash-bundle copies it from there directly.
   '';
 
   meta = {

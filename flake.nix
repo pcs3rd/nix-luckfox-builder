@@ -183,6 +183,26 @@
       # and modules/core/sdimage.nix — no separate -ab configuration needed.
       picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;    };
 
+      # ── Rockchip USB download miniloader ───────────────────────────────────────
+      #
+      # This is what `rkdeveloptool db` expects: a Rockchip Loader-format binary
+      # with a "BOOT" magic header that initialises DRAM over USB and presents the
+      # USB flashing interface.  It is NOT the U-Boot SPL / idbloader — those are
+      # different formats that go ON the flash.  The miniloader is uploaded
+      # transiently over USB during flashing and is never written to storage.
+      #
+      # The pinned luckfox-pico SDK revision (824b817f) does not include the
+      # rv1106_miniloader_*.bin file in its rkbin directory, so we fetch it
+      # separately here, pinned to the same luckfox-pico main-branch tree.
+      #
+      # To refresh the hash after a version bump:
+      #   nix-prefetch-url \
+      #     https://github.com/rockchip-linux/rkbin/raw/master/bin/rv11/rv110x_miniloader_v1.26.bin
+      rv1106Miniloader = hostPkgs.fetchurl {
+        url    = "https://github.com/rockchip-linux/rkbin/raw/master/bin/rv11/rv110x_miniloader_v1.26.bin";
+        sha256 = "sha256-0rdwqhdz4sw339a5c8c3mv6ahkhivxdjixzf8w08gnaya33kghgx";
+      };
+
       # ── SPI NOR image ──────────────────────────────────────────────────────────
       #
       # 8 MiB blank image with the SPL written at offset 0x8000 (the Rockchip
@@ -224,19 +244,10 @@
       flashBundle = hostPkgs.runCommand "luckfox-flash-bundle" {} ''
         mkdir -p $out
         cp ${picoMiniB.config.system.build.uboot}/SPL              $out/SPL
-        if [ -f ${picoMiniB.config.system.build.uboot}/rv1106_miniloader.bin ]; then
-          cp ${picoMiniB.config.system.build.uboot}/rv1106_miniloader.bin \
-                                                                   $out/rv1106_miniloader.bin
-        else
-          echo "WARNING: rv1106_miniloader.bin not found in uboot output" >&2
-          echo "  The rkbin directory in the luckfox-pico SDK may not include" >&2
-          echo "  rv1106_miniloader_*.bin for this revision." >&2
-          echo "  For rkdeveloptool db, fetch it manually from:" >&2
-          echo "  https://github.com/LuckfoxTECH/luckfox-pico/tree/main/sysdrv/source/uboot/rkbin/bin/rv11/" >&2
-        fi
-        cp ${spiImage}/spi.img                                     $out/spi.img
+        cp ${rv1106Miniloader}                                      $out/rv1106_miniloader.bin
+        cp ${spiImage}/spi.img                                      $out/spi.img
         cp ${picoMiniB-sdimage.config.system.build.sdImage}/sd-flashable.img \
-                                                                   $out/sd-flashable.img
+                                                                    $out/sd-flashable.img
       '';
 
       # ── QEMU test disk (read-only ext4 image of the rootfs) ─────────────────
