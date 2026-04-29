@@ -13,7 +13,7 @@ from a single declarative `configuration.nix`.
 git clone https://github.com/youruser/nix-luckfox-builder
 cd nix-luckfox-builder
 
-# Edit configuration.nix, then build and flash
+# Build and flash
 nix build .#sdImage-flashable
 sudo dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
 
@@ -21,10 +21,13 @@ sudo dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
 nix run .#qemu-test
 
 # Zero-downtime upgrades over SSH (A/B rootfs)
-nix build .#sdImage-ab                             # flash once
 nix build .#rootfsPartition
 ssh root@luckfox upgrade < result/rootfs.squashfs  # stream future upgrades
 ```
+
+See **[doc/getting-started.md](doc/getting-started.md)** for full flashing
+instructions, including how to boot from SD card and optionally flash the SPI
+NOR so the BOOT button is no longer needed.
 
 ---
 
@@ -32,7 +35,8 @@ ssh root@luckfox upgrade < result/rootfs.squashfs  # stream future upgrades
 
 | Document | Contents |
 |---|---|
-| [doc/hardware.md](doc/hardware.md) | Supported boards, kernel setup, build targets, flashing |
+| [doc/getting-started.md](doc/getting-started.md) | First-time build, SD card flashing, SPI NOR setup |
+| [doc/hardware.md](doc/hardware.md) | Supported boards, kernel setup, build targets |
 | [doc/configuration.md](doc/configuration.md) | configuration.nix reference — USB, MCU, zram, networking, users |
 | [doc/services.md](doc/services.md) | Service options — SSH, getty, mesh-bbs, meshtasticd, nrfnet, companion-satellite |
 | [doc/ab-rootfs.md](doc/ab-rootfs.md) | A/B rootfs — upgrade workflow, slot/upgrade/slot-share tools, fallback |

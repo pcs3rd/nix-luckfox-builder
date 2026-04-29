@@ -52,9 +52,9 @@ All targets are cross-compiled for ARMv7 musl from any supported host
 | `uboot` | `SPL` + `u-boot.img` | Bootloader blobs only |
 | `sdImage` | `result/sd.img` | Raw SD image |
 | `sdImage-flashable` | `result/sd-flashable.img` | Flash to card with `dd` |
-| `sdImage-ab` | `result/sd-flashable.img` | A/B image — flash once, upgrade over SSH |
 | `rootfsPartition` | `result/rootfs.squashfs` | Slot squashfs for `upgrade` streaming |
 | `slotSelectInitramfs` | `result/initramfs-slotselect.cpio.gz` | Slot-select initramfs only |
+| `spi-image` | `result/spi.img` | Raw 8 MiB SPI NOR image (SPL only) |
 
 On Apple Silicon, prefix targets with `.#packages.aarch64-darwin.`:
 
@@ -62,7 +62,11 @@ On Apple Silicon, prefix targets with `.#packages.aarch64-darwin.`:
 nix build .#packages.aarch64-darwin.sdImage-flashable
 ```
 
-### Flashing
+---
+
+## Flashing
+
+### SD card (required every time without SPI bootloader)
 
 ```sh
 nix build .#sdImage-flashable
@@ -70,4 +74,49 @@ sudo dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
 ```
 
 Replace `/dev/sdX` with your SD card device (`diskutil list` on macOS,
-`lsblk` on Linux). The image is safe to flash to any card ≥ the image size.
+`lsblk` on Linux).
+
+The Pico Mini B normally boots from its onboard SPI NOR flash. To boot
+from the SD card, **hold the BOOT button while plugging in USB power**, then
+release it after ~1 second. The RV1103 boot ROM bypasses SPI NOR and reads
+the bootloader directly from the SD card.
+
+---
+
+### SPI NOR flash (boot from SD card without holding BOOT)
+
+Flashing the SPL to SPI NOR makes the board boot from SD card automatically
+on every power-on. The SPI NOR only needs to hold the SPL (~200 KB); U-Boot
+and the kernel remain on the SD card.
+
+**Build the SPI image:**
+
+```sh
+nix build .#spi-image
+# Produces result/spi.img (8 MiB raw image, SPL at offset 0x8000)
+```
+
+**Flash with `rkdeveloptool`:**
+
+```sh
+# 1. Enter maskrom mode: hold BOOT, plug in USB-C, release BOOT
+# 2. Verify the device is visible
+rkdeveloptool ld
+
+# 3. Flash
+rkdeveloptool db result/SPL        # upload SPL to initialise DRAM (required first)
+rkdeveloptool ef                   # erase SPI NOR
+rkdeveloptool wf result/spi.img    # write the 8 MiB raw image
+rkdeveloptool rd                   # reset
+
+# Install rkdeveloptool if needed:
+nix-shell -p rkdeveloptool
+```
+
+After flashing, the board boots from SD card on every power-on with no
+button held. To restore the factory Luckfox firmware, re-flash using the
+Luckfox SDK tools via the same maskrom procedure.
+
+> **Note:** `result/SPL` (used in the `db` step) is also available as a
+> standalone build target via `nix build .#uboot` — it appears at
+> `result/SPL` alongside `result/u-boot.img`.
