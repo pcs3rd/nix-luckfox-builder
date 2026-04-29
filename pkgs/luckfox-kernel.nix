@@ -38,8 +38,8 @@
 { pkgs }:
 
 let
-  LUCKFOX_REV    = "438d5270a38c59a74f142dfa31ffbf51b096ce72";
-  LUCKFOX_SHA256 = "sha256-iPmQLKzgznBp3CJMvbbGrtLgd9P0jHgBrynqGnsAygI=";
+  LUCKFOX_REV    = "824b817f889c2cbff1d48fcdb18ab494a68f69d1";
+  LUCKFOX_SHA256 = "sha256-M+8/A5htxSvfAVTrMrUrDE20h3ffcAgiPASkm6XjGsU=";
 
   # The SDK for this revision ships rv1106_defconfig as the base config.
   # (luckfox_pico_mini_b_defconfig does not exist in this tree — confirmed by
