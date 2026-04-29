@@ -47,10 +47,13 @@ let
   KERNEL_DEFCONFIG = "rv1106_defconfig";
 
   # In a Nix cross stdenv, pkgs.stdenv.cc is the cross-compiler wrapper
-  # (target = armv7l musl).  pkgs.buildPackages.stdenv.cc is the native
-  # (build-host) compiler used for host-side build tools.
+  # (target = armv7l musl).  For host-side build tools (fixdep, conf, etc.)
+  # we need a native GCC explicitly — buildPackages.stdenv.cc may be clang
+  # on systems where clang is the default, and clang wrappers don't expose
+  # a 'gcc' binary.  Pin to buildPackages.gcc to always get real GCC.
   crossCompile = "${pkgs.stdenv.cc}/bin/${pkgs.stdenv.cc.targetPrefix}";
-  hostCC       = "${pkgs.buildPackages.stdenv.cc}/bin/gcc";
+  hostGCC      = pkgs.buildPackages.gcc;
+  hostCC       = "${hostGCC}/bin/gcc";
 
   # ── Replacement build scripts ────────────────────────────────────────────────
   #
@@ -166,6 +169,9 @@ pkgs.stdenv.mkDerivation {
     pkg-config
     # dtc is required for `make dtbs`
     dtc
+    # Explicit GCC for HOSTCC — stdenv.cc may be clang on some hosts and
+    # clang wrappers don't expose a 'gcc' binary that the kernel Makefiles expect.
+    hostGCC
   ];
 
   enableParallelBuilding = true;
