@@ -6,7 +6,10 @@ let
     # sha256 = "sha256:...";
   };
 
-  pkgs = import <nixpkgs> { system = builtins.currentSystem; };
+  pkgs = import <nixpkgs> {
+    system = builtins.currentSystem;
+    config.allowUnfree = true;
+  };
 
   claudeCode = (pkgs.callPackage "${claudeCodeNix}/package.nix" {});
 in
