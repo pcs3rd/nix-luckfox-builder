@@ -224,8 +224,16 @@
       flashBundle = hostPkgs.runCommand "luckfox-flash-bundle" {} ''
         mkdir -p $out
         cp ${picoMiniB.config.system.build.uboot}/SPL              $out/SPL
-        cp ${picoMiniB.config.system.build.uboot}/rv1106_miniloader.bin \
+        if [ -f ${picoMiniB.config.system.build.uboot}/rv1106_miniloader.bin ]; then
+          cp ${picoMiniB.config.system.build.uboot}/rv1106_miniloader.bin \
                                                                    $out/rv1106_miniloader.bin
+        else
+          echo "WARNING: rv1106_miniloader.bin not found in uboot output" >&2
+          echo "  The rkbin directory in the luckfox-pico SDK may not include" >&2
+          echo "  rv1106_miniloader_*.bin for this revision." >&2
+          echo "  For rkdeveloptool db, fetch it manually from:" >&2
+          echo "  https://github.com/LuckfoxTECH/luckfox-pico/tree/main/sysdrv/source/uboot/rkbin/bin/rv11/" >&2
+        fi
         cp ${spiImage}/spi.img                                     $out/spi.img
         cp ${picoMiniB-sdimage.config.system.build.sdImage}/sd-flashable.img \
                                                                    $out/sd-flashable.img
