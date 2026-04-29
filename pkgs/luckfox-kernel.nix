@@ -213,12 +213,13 @@ pkgs.stdenv.mkDerivation {
     #   scripts/Makefile        — declares it as a host program to build
     #   scripts/link-vmlinux.sh — calls ./scripts/sorttable vmlinux after link
     #
-    # For scripts/Makefile, delete the line entirely (it's a simple assignment).
-    # For link-vmlinux.sh, replace the binary path with 'true' rather than
-    # deleting — the call is inside a function/if block, and removing the line
-    # leaves a lone '}' which causes a shell syntax error.
+    # Approach: remove it from the Makefile so sorttable.c is never compiled
+    # (avoiding the elf.h dependency), then plant a do-nothing stub so that
+    # link-vmlinux.sh finds the binary and exits cleanly — no shell surgery
+    # needed, which avoids breaking the brace/function structure of the script.
     sed -i '/sorttable/d' scripts/Makefile
-    sed -i 's|./scripts/sorttable|true|g' scripts/link-vmlinux.sh
+    printf '#!/bin/sh\nexit 0\n' > scripts/sorttable
+    chmod +x scripts/sorttable
 
     # ── Force-add Luckfox Pico board DTS files to the build ───────────────────
     #
