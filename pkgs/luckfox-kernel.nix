@@ -212,8 +212,13 @@ pkgs.stdenv.mkDerivation {
     # Two places reference it:
     #   scripts/Makefile        — declares it as a host program to build
     #   scripts/link-vmlinux.sh — calls ./scripts/sorttable vmlinux after link
+    #
+    # For scripts/Makefile, delete the line entirely (it's a simple assignment).
+    # For link-vmlinux.sh, replace the binary path with 'true' rather than
+    # deleting — the call is inside a function/if block, and removing the line
+    # leaves a lone '}' which causes a shell syntax error.
     sed -i '/sorttable/d' scripts/Makefile
-    sed -i '/sorttable/d' scripts/link-vmlinux.sh
+    sed -i 's|./scripts/sorttable|true|g' scripts/link-vmlinux.sh
 
     # ── Force-add Luckfox Pico board DTS files to the build ───────────────────
     #
