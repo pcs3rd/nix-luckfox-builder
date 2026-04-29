@@ -39,7 +39,7 @@
 
 let
   LUCKFOX_REV    = "438d5270a38c59a74f142dfa31ffbf51b096ce72";
-  LUCKFOX_SHA256 = "sha256-7quO4isxA1ljnV6Iu0BI2B1VeguTYaqeBxO3FJLZe8A=";
+  LUCKFOX_SHA256 = "sha256-iPmQLKzgznBp3CJMvbbGrtLgd9P0jHgBrynqGnsAygI=";
 
   # The SDK for this revision ships rv1106_defconfig as the base config.
   # (luckfox_pico_mini_b_defconfig does not exist in this tree — confirmed by
@@ -171,10 +171,6 @@ pkgs.stdenv.mkDerivation {
     pkg-config
     # dtc is required for `make dtbs`
     dtc
-    # glibc.dev provides <elf.h>, needed by scripts/sorttable (a host tool).
-    # The Nix sandbox has no /usr/include; glibc.dev injects the include path
-    # into NIX_CFLAGS_COMPILE_FOR_BUILD, which the HOSTCC cc-wrapper picks up.
-    glibc.dev
   ];
 
   enableParallelBuilding = true;
@@ -205,6 +201,15 @@ pkgs.stdenv.mkDerivation {
 
     echo "patched: gcc-wrapper.py gcc-version.sh ld-version.sh clang-version.sh"
 
+    # ── Drop sorttable from the host-tools build ──────────────────────────────
+    #
+    # scripts/sorttable.c includes <elf.h>, a glibc-specific header that doesn't
+    # exist on macOS (where pkgs.buildPackages is aarch64-darwin).  sorttable is
+    # an optional build-time optimisation that pre-sorts the kernel exception
+    # table; without it, the kernel sorts it at boot time in sort_main_extable().
+    # Both paths produce identical runtime behaviour; boot overhead is negligible.
+    sed -i '/sorttable/d' scripts/Makefile
+
     # ── Force-add Luckfox Pico board DTS files to the build ───────────────────
     #
     # rv1106_defconfig compiles only its own board list; Pico Mini B DTS files
@@ -229,16 +234,10 @@ pkgs.stdenv.mkDerivation {
     echo "=== available ARM defconfigs ==="
     ls arch/arm/configs/ | grep -iE 'luckfox|rv110[36]' || true
 
-    # HOSTCFLAGS must include glibc headers so host tools (fixdep, sorttable,
-    # etc.) can find <elf.h> and other system headers.  The Nix sandbox has no
-    # /usr/include; we inject the path explicitly here and in buildPhase.
-    hostcflags="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -I${pkgs.buildPackages.glibc.dev}/include"
-
     make \
       ARCH=arm \
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
-      HOSTCFLAGS="$hostcflags" \
       ${KERNEL_DEFCONFIG}
 
     # ── Size reduction: disable large unused subsystems ──────────────────────
@@ -295,7 +294,6 @@ SIZECFG
       ARCH=arm \
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
-      HOSTCFLAGS="$hostcflags" \
       olddefconfig
   '';
 
@@ -315,7 +313,6 @@ SIZECFG
       ARCH=arm \
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
-      HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -I${pkgs.buildPackages.glibc.dev}/include" \
       KCFLAGS="-Wno-dangling-pointer -Wno-array-parameter -Wno-use-after-free" \
       zImage dtbs modules
   '';
