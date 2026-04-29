@@ -1,4 +1,8 @@
-# Package set for the Luckfox Pico Mini B.
+# Package set for Luckfox boards.
+#
+# nova-kernel and nova-uboot are included here so `import ./pkgs { inherit pkgs; }`
+# always returns a complete attrset.  They should only be used when pkgs targets
+# aarch64 (i.e. when building the Nova via mkSystemNova in flake.nix).
 #
 # Import this file to get an attrset of all local packages:
 #
@@ -26,6 +30,8 @@
   nrfnet                 = import ./nrfnet.nix                 { inherit pkgs; };
   "mesh-bbs"             = import ./mesh-bbs                   { inherit pkgs; };
   meshtastic-cli         = import ./meshtastic-cli.nix         { inherit pkgs; };
+  nova-kernel            = import ./nova-kernel.nix            { inherit pkgs; };
+  nova-uboot             = import ./nova-uboot.nix             { inherit pkgs; };
   # ox64-firmware intentionally omitted here — it is imported directly by
   # hardware/ox64.nix using the pkgsRv64 package set, not the ARMv7 pkgs.
   # Build it with:  nix build .#packages.<system>.ox64-firmware

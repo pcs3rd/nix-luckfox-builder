@@ -138,24 +138,44 @@
       hostPkgs = import nixpkgs { inherit system; };
 
       # ── Cross-compilation packages: build on host, target ARMv7 musl ───────
+      # Used for Pico Mini B (RV1103 / Cortex-A7).
       pkgs = import nixpkgs {
         inherit system;
         crossSystem = { config = "armv7l-unknown-linux-musleabihf"; };
       };
 
-      mkSystem   = import ./lib/mkSystem.nix {
+      # ── Cross-compilation packages: build on host, target AArch64 musl ─────
+      # Used for Luckfox Nova (RK3308 / Cortex-A35).
+      pkgsNova = import nixpkgs {
+        inherit system;
+        crossSystem = { config = "aarch64-unknown-linux-musl"; };
+      };
+
+      buildDate =
+        let d = self.lastModifiedDate or "00000000000000";
+        in "${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d}";
+
+      # mkSystem for Pico Mini B (ARMv7 musl pkgs).
+      mkSystem = import ./lib/mkSystem.nix {
         inherit pkgs;
-        lib      = pkgs.lib;
-        # Format self.lastModifiedDate (YYYYMMDDHHmmss) → YYYY-MM-DD.
-        # Falls back to "unknown" for dirty trees where lastModifiedDate is absent.
-        buildDate =
-          let d = self.lastModifiedDate or "00000000000000";
-          in "${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d}";
+        lib       = pkgs.lib;
+        inherit buildDate;
+      };
+
+      # mkSystem for Luckfox Nova (AArch64 musl pkgs).
+      mkSystemNova = import ./lib/mkSystem.nix {
+        pkgs      = pkgsNova;
+        lib       = pkgsNova.lib;
+        inherit buildDate;
       };
 
       # ── System evaluations ──────────────────────────────────────────────────
-      picoMiniB         = mkSystem   { configuration = ./configuration.nix;             };
-      picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix;  };
+      #
+      # Real-hardware evaluations pass model = "<board>" so mkSystem imports the
+      # correct hardware kernel file.  QEMU evaluations omit model so the Luckfox
+      # SDK kernel derivation is never pulled into the QEMU build closure.
+      picoMiniB         = mkSystem   { configuration = ./configuration.nix;            model = "pico-mini-b"; };
+      picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix; };
       # ── QEMU A/B system evaluation ─────────────────────────────────────────
       #
       # Uses the same sdimage.nix SD image builder as real hardware — the only
@@ -176,12 +196,15 @@
           }
         ];
       };
-      picoMiniB-vm      = mkSystem   { configuration = ./configurations/qemu-vm.nix;    };
+      picoMiniB-vm      = mkSystem   { configuration = ./configurations/qemu-vm.nix;   };
       # Unified SD image: A/B squashfs layout when system.abRootfs.enable = true
       # (the default in configuration.nix), single ext4 partition otherwise.
       # The partition layout is determined entirely inside configurations/sdimage.nix
       # and modules/core/sdimage.nix — no separate -ab configuration needed.
-      picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;    };
+      picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;   model = "pico-mini-b"; };
+
+      # ── Luckfox Nova (RK3308 / AArch64) ────────────────────────────────────
+      nova              = mkSystemNova { configuration = ./configurations/nova-sdimage.nix; model = "nova"; };
 
       # ── Rockchip USB download miniloader ───────────────────────────────────────
       #
@@ -679,6 +702,19 @@ RUNEOF
         sdImage-flashable     = picoMiniB-sdimage.config.system.build.sdImage;
         rootfsPartition       = picoMiniB-sdimage.config.system.build.rootfsPartition;
         slotSelectInitramfs   = picoMiniB-sdimage.config.system.build.slotSelectInitramfs;
+
+        # ── Luckfox Nova (RK3308 / AArch64) outputs ──────────────────────────
+        #
+        # Fill in the hash placeholders in pkgs/nova-kernel.nix and
+        # pkgs/nova-uboot.nix before these will build successfully.
+        #
+        # nix build .#nova-sdImage-flashable
+        # dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
+        nova-firmware         = nova.config.system.build.firmware;
+        nova-rootfs           = nova.config.system.build.rootfs;
+        nova-uboot            = nova.config.system.build.uboot;
+        nova-sdImage-flashable = nova.config.system.build.sdImage;
+        nova-rootfsPartition  = nova.config.system.build.rootfsPartition;
 
         # QEMU test outputs — Linux hosts only.
         # Building the ARM kernel requires a Linux build environment; Darwin

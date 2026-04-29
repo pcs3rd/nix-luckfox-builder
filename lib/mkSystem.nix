@@ -1,15 +1,36 @@
 { pkgs, lib, buildDate ? "unknown" }:
 
-# configuration may be a single module (path or attrset) or a list of modules.
-{ configuration }:
+# configuration — a single module (path or attrset) or a list of modules.
+# model         — optional board model string.  When set, the corresponding
+#                 hardware kernel file is imported so the real SDK kernel and
+#                 U-Boot derivations are available.  Omit for QEMU evaluations
+#                 to avoid forcing the Luckfox SDK kernel to be built.
+#
+#   Valid values:  "pico-mini-b"  — imports hardware/pico-mini-b-kernel.nix
+#                  "nova"         — imports hardware/nova-kernel.nix
+#                  null (default) — no hardware kernel file imported (QEMU)
+{ configuration, model ? null }:
 
-lib.evalModules {
-  # buildDate is passed from the flake (self.lastModifiedDate) and available
-  # as a plain function argument in any module: { buildDate, ... }: { ... }
-  specialArgs = { inherit pkgs lib buildDate; };
+let
+  # Hardware kernel files, conditionally included based on model.
+  # Each file sets device.kernel, device.dtb, device.kernelModulesPath,
+  # boot.uboot.spl, and boot.uboot.package for the selected board.
+  # These are kept in separate files so Nix only evaluates the derivations
+  # for the board that is actually being built.
+  hardwareModules =
+    if      model == "pico-mini-b" then [ ../hardware/pico-mini-b-kernel.nix ]
+    else if model == "nova"        then [ ../hardware/nova-kernel.nix ]
+    else                                [];
 
-  modules = lib.toList configuration ++ [
+in lib.evalModules {
+  # buildDate is formatted from self.lastModifiedDate in flake.nix.
+  # model is passed through so luckfox-board.nix can use it as the default
+  # value for the luckfox.model option without the user having to repeat it.
+  specialArgs = { inherit pkgs lib buildDate model; };
+
+  modules = lib.toList configuration ++ hardwareModules ++ [
     ../modules/core/options.nix
+    ../modules/core/luckfox-board.nix
     ../modules/core/rootfs.nix
     ../modules/core/services.nix
     ../modules/core/networking.nix
