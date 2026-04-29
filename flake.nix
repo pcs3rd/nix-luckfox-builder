@@ -200,7 +200,7 @@
       #     https://github.com/rockchip-linux/rkbin/raw/master/bin/rv11/rv110x_miniloader_v1.26.bin
       rv1106Miniloader = hostPkgs.fetchurl {
         url    = "https://github.com/rockchip-linux/rkbin/raw/master/bin/rv11/rv110x_miniloader_v1.26.bin";
-        sha256 = "sha256-0rdwqhdz4sw339a5c8c3mv6ahkhivxdjixzf8w08gnaya33kghgx";
+        sha256 = "0rdwqhdz4sw339a5c8c3mv6ahkhivxdjixzf8w08gnaya33kghgx";
       };
 
       # ── SPI NOR image ──────────────────────────────────────────────────────────
