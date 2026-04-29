@@ -87,9 +87,15 @@ in
   #          ssh root@luckfox upgrade < result/rootfs.squashfs
   #
   system.abRootfs = {
-    enable   = true;
-    swapSize = 32;  # MiB — disable with 0
+    enable      = true;
+    swapSize    = 32;   # MiB of disk swap in persist partition — disable with 0
+    persistSize = 64;   # MiB for overlayfs upper/work dirs (default 256 is excessive)
   };
+
+  # Total SD image size in MiB.  Slots get whatever's left after boot + persist:
+  #   512 MiB − 2 MiB gap − 64 MiB boot − 64 MiB persist = 382 MiB ÷ 2 = 191 MiB/slot
+  # Increase if your rootfs squashfs ever exceeds ~150 MiB.
+  system.imageSize = 512;
   # ── Bootloader ──────────────────────────────────────────────────────────────
   boot.uboot = {
     enable  = true;
