@@ -629,38 +629,44 @@ RUNEOF
         qemu-test = {
           type    = "app";
           program = "${qemu-test}/bin/qemu-test-luckfox";
+          meta.description = "Run the Luckfox rootfs in QEMU (read-only virtio-blk disk)";
         };
         qemu-overlay = {
           type    = "app";
           program = "${qemu-overlay}/bin/qemu-overlay-luckfox";
+          meta.description = "Run the Luckfox rootfs in QEMU with an ephemeral QCOW2 overlay";
         };
         qemu-vm = {
           type    = "app";
           program = "${qemu-vm}/bin/qemu-vm-luckfox";
+          meta.description = "Run the Luckfox rootfs as a persistent QEMU VM";
         };
         qemu-ab = {
           type    = "app";
           program = "${qemu-ab}/bin/qemu-ab-luckfox";
+          meta.description = "Run the A/B squashfs rootfs in QEMU via U-Boot (TCG, all hosts)";
         };
         qemu-ab-kvm = {
           type    = "app";
           program = "${qemu-ab-kvm}/bin/qemu-ab-kvm-luckfox";
+          meta.description = "Run the A/B squashfs rootfs in QEMU via U-Boot with KVM acceleration (Linux ARM hosts only)";
         };
       };
-
-      defaultPackage = picoMiniB.config.system.build.firmware;
 
       devShells.default = hostPkgs.mkShell {
         buildInputs = [ hostPkgs.nixpkgs-fmt hostPkgs.qemu ];
       };
+
+      # packages.default replaces the deprecated defaultPackage output.
+      # Set inside outputsFor so the per-system packages attrset is complete.
+      packages-default = picoMiniB.config.system.build.firmware;
     };
 
     allOutputs = lib.genAttrs supportedSystems outputsFor;
 
   in {
-    packages       = lib.mapAttrs (_: o: o.packages)       allOutputs;
-    apps           = lib.mapAttrs (_: o: o.apps)           allOutputs;
-    defaultPackage = lib.mapAttrs (_: o: o.defaultPackage) allOutputs;
-    devShells      = lib.mapAttrs (_: o: o.devShells)      allOutputs;
+    packages  = lib.mapAttrs (_: o: o.packages // { default = o.packages-default; }) allOutputs;
+    apps      = lib.mapAttrs (_: o: o.apps)      allOutputs;
+    devShells = lib.mapAttrs (_: o: o.devShells) allOutputs;
   };
 }
