@@ -668,5 +668,15 @@ RUNEOF
     packages  = lib.mapAttrs (_: o: o.packages // { default = o.packages-default; }) allOutputs;
     apps      = lib.mapAttrs (_: o: o.apps)      allOutputs;
     devShells = lib.mapAttrs (_: o: o.devShells) allOutputs;
+
+    # checks.<system>.* derivations are BUILT (not just evaluated) by `nix flake check`.
+    # Alias the packages that matter most so CI / nix flake check always validates them.
+    # Linux-only: the kernel and SD image require a Linux build host.
+    checks = lib.mapAttrs (system: o:
+      lib.optionalAttrs (lib.hasSuffix "-linux" system) {
+        rootfs            = o.packages.rootfs;
+        sdImage-flashable = o.packages.sdImage-flashable;
+      }
+    ) allOutputs;
   };
 }

@@ -247,6 +247,9 @@ pkgs.stdenv.mkDerivation {
     CONFIG_DEBUG_INFO=n
     # Staging drivers — experimental, not needed for production.
     CONFIG_STAGING=n
+    # CONFIG_WERROR: added in Linux 5.15; silently ignored by olddefconfig on 5.10.
+    # Disabling it here is belt-and-suspenders alongside the KCFLAGS fix below.
+    CONFIG_WERROR=n
     # A/B boot: ensure squashfs + overlayfs are built-in (not modules) so
     # the initramfs can mount them without needing insmod at boot.
     CONFIG_SQUASHFS=y
@@ -262,10 +265,22 @@ SIZECFG
   '';
 
   buildPhase = ''
+    # KCFLAGS: suppress GCC 12+ warnings that Linux 5.10 was never written to
+    # handle.  The kernel treats these as errors via -Werror, so without the
+    # suppression the build fails even though the code is correct.
+    #
+    #   -Wno-dangling-pointer  — false positive in drivers/dma-buf/dma-fence.c:
+    #                            storing the address of a local inside a fence
+    #                            callback struct that is fully in scope
+    #   -Wno-array-parameter   — GCC 12 stricter about array pointer decay in
+    #                            function signatures; harmless in kernel context
+    #   -Wno-use-after-free    — GCC 12 heuristic false positives in linked-list
+    #                            manipulation macros
     make -j$NIX_BUILD_CORES \
       ARCH=arm \
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
+      KCFLAGS="-Wno-dangling-pointer -Wno-array-parameter -Wno-use-after-free" \
       zImage dtbs modules
   '';
 
