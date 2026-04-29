@@ -56,7 +56,7 @@ configurations/
   qemu-vm.nix               QEMU QCOW2 disk VM
   qemu-ab.nix               QEMU A/B rootfs test (squashfs + overlayfs)
   sdimage.nix               Flashable SD image with overlayfs
-  sdimage-ab.nix            Flashable A/B SD image (4-partition layout)
+  sdimage.nix               Flashable SD image (layout from system.abRootfs.enable)
 
 hardware/
   pico-mini-b.nix           Luckfox Pico Mini B hardware profile

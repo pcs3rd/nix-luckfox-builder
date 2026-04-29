@@ -1,46 +1,70 @@
-# Flashable SD image with persistent overlayfs.
+# Flashable SD image for Luckfox Pico Mini B.
 #
-# Inherits all settings from configuration.nix and adds:
-#   - init-overlay: kernel init= entry point that sets up overlayfs
-#   - sfdisk, mkfs.ext4, blkid, blockdev in the rootfs
+# The partition layout is selected automatically based on system.abRootfs.enable
+# (set in configuration.nix).  No layout flag is needed here.
 #
-# Boot layout:
-#   Partition 1 (/dev/mmcblk0p1) — ext4 rootfs, read-only lower layer
-#   Partition 2 (/dev/mmcblk0p2) — ext4 overlay (created on first boot from
-#                                   the unpartitioned space after partition 1)
+# ── A/B layout  (system.abRootfs.enable = true) ──────────────────────────────
 #
-# On first power-on with a freshly-flashed card:
-#   Boot 1 — init-overlay creates and formats the overlay partition, then
-#             completes the normal boot.  The rootfs partition is never
-#             modified again.
+#   Sector 0            : MBR + partition table
+#   Sector 1 (byte 512) : slot indicator byte 'a'
+#   Sector 64           : Rockchip SPL / idbloader
+#   Sector 16384        : U-Boot proper
+#   p1 (ext4 "boot")    : kernel + initramfs + boot.scr
+#   p2 (squashfs)       : slot A rootfs  (read-only)
+#   p3 (squashfs)       : slot B rootfs  (read-only)
+#   p4 (ext4 "persist") : overlayfs upper/work dirs (survives upgrades)
 #
-# On all subsequent boots:
-#   init-overlay mounts the overlay and overlays it on the read-only rootfs.
-#   All writes (config changes, package installs, logs) go to the overlay.
-#   Wipe the overlay partition to get a clean slate without reflashing.
+#   Image size default: 2048 MiB
+#   p1 = 64 MiB  |  p2 = p3 ≈ 863 MiB  |  p4 = 256 MiB
 #
-# Build with:
-#   nix build .#sdImage-flashable
+# ── Single-partition layout  (system.abRootfs.enable = false) ─────────────────
 #
-# Flash with:
-#   dd if=result of=/dev/sdX bs=4M status=progress
+#   Sector 0            : MBR + partition table
+#   Sector 64           : Rockchip SPL / idbloader
+#   Sector 16384        : U-Boot proper
+#   p1 (ext4 "rootfs")  : kernel + rootfs + extlinux.conf (all in one partition)
+#
+#   Image size default: 512 MiB
+#
+# ── Build ─────────────────────────────────────────────────────────────────────
+#
+#   nix build .#sdImage-flashable        # full SD card image
+#   nix build .#rootfsPartition          # standalone squashfs (A/B upgrades only)
+#
+# ── Flash ─────────────────────────────────────────────────────────────────────
+#
+#   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
+#
+# ── Upgrade (A/B only) ────────────────────────────────────────────────────────
+#
+#   nix build .#rootfsPartition
+#   ssh root@luckfox upgrade < result/rootfs.squashfs
 
-{ lib, ... }:
+{ config, lib, ... }:
 
 {
   imports = [
     ../configuration.nix
+    # Builds the kernel, DTBs, and modules from the LuckfoxTECH SDK source.
+    # Kept in a separate file so QEMU configs (which also import configuration.nix)
+    # do not force this derivation to be evaluated.
     ../hardware/pico-mini-b-kernel.nix
   ];
 
-  system.sdOverlay.enable = true;
+  # Image size scales with the layout chosen by system.abRootfs.enable:
+  #   A/B  (4 partitions): 2048 MiB — generous room for two squashfs slots
+  #   Single (1 partition):  512 MiB — rootfs + kernel in one ext4 partition
+  system.imageSize = lib.mkDefault (
+    if config.system.abRootfs.enable then 2048 else 512
+  );
 
-  # Rootfs partition size.  Free space beyond this on the physical card becomes
-  # the overlay partition (created on first boot).
-  system.imageSize = lib.mkDefault 512;
-
-  # The kernel must start init-overlay as PID 1.  It sets up the overlay then
-  # execs /sbin/init.  Mount the rootfs read-only so all writes go to overlay.
-  boot.cmdline = lib.mkForce
-    "console=ttyS0 root=/dev/mmcblk0p1 ro rootfstype=ext4 init=/sbin/init-overlay";
+  # Boot cmdline adapts to the layout:
+  #   A/B  — no root= needed; the slot-select initramfs mounts the active
+  #           squashfs slot and overlays the persist partition before switch_root.
+  #   Single — direct extlinux.conf boot, kernel mounts p1 as the ext4 rootfs.
+  boot.cmdline = lib.mkDefault (
+    if config.system.abRootfs.enable
+    then "console=ttyS0 init=/sbin/init panic=1"
+    else "console=ttyS0 root=/dev/mmcblk0p1 rw rootfstype=ext4 init=/sbin/init"
+  );
 }

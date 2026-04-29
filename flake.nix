@@ -177,8 +177,11 @@
         ];
       };
       picoMiniB-vm      = mkSystem   { configuration = ./configurations/qemu-vm.nix;    };
+      # Unified SD image: A/B squashfs layout when system.abRootfs.enable = true
+      # (the default in configuration.nix), single ext4 partition otherwise.
+      # The partition layout is determined entirely inside configurations/sdimage.nix
+      # and modules/core/sdimage.nix — no separate -ab configuration needed.
       picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;    };
-      picoMiniB-ab      = mkSystem   { configuration = ./configurations/sdimage-ab.nix; };
 
       # ── QEMU test disk (read-only ext4 image of the rootfs) ─────────────────
       qemu-test-disk = hostPkgs.runCommand "luckfox-test.img" {
@@ -422,7 +425,7 @@ RUNEOF
       # real-hardware rootfsPartition so QEMU tests validate the production image.
       #   nix build .#qemu-ab-rootfs
       #   ssh root@localhost -p <port> upgrade < result/rootfs.squashfs
-      qemu-ab-rootfs = picoMiniB-ab.config.system.build.rootfsPartition;
+      qemu-ab-rootfs = picoMiniB-sdimage.config.system.build.rootfsPartition;
 
       # ── QEMU A/B launcher (U-Boot firmware) ─────────────────────────────────
       #
@@ -584,15 +587,19 @@ RUNEOF
         # Inspect result/dtbs/ to find the correct DTB name for hardware/pico-mini-b.nix.
         luckfox-kernel    = import ./pkgs/luckfox-kernel.nix { inherit pkgs; };
         sdImage           = picoMiniB.config.system.build.image;
-        sdImage-flashable = picoMiniB-sdimage.config.system.build.sdImage;
 
-        # A/B rootfs outputs (zero-downtime SSH upgrades)
-        # Flash sdImage-ab to a card, then use rootfsPartition for subsequent upgrades:
-        #   nix build .#sdImage-ab && dd if=result/sd-flashable.img of=/dev/sdX bs=4M
-        #   nix build .#rootfsPartition && ssh root@luckfox upgrade < result/rootfs.squashfs
-        sdImage-ab            = picoMiniB-ab.config.system.build.sdImage;
-        rootfsPartition       = picoMiniB-ab.config.system.build.rootfsPartition;
-        slotSelectInitramfs   = picoMiniB-ab.config.system.build.slotSelectInitramfs;
+        # Full flashable SD card image — partition layout determined by
+        # system.abRootfs.enable (set in configuration.nix):
+        #
+        #   true  → 4-partition A/B squashfs layout (default)
+        #   false → single ext4 partition
+        #
+        # Flash:   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
+        # Upgrade: nix build .#rootfsPartition
+        #          ssh root@luckfox upgrade < result/rootfs.squashfs
+        sdImage-flashable     = picoMiniB-sdimage.config.system.build.sdImage;
+        rootfsPartition       = picoMiniB-sdimage.config.system.build.rootfsPartition;
+        slotSelectInitramfs   = picoMiniB-sdimage.config.system.build.slotSelectInitramfs;
 
         # QEMU test outputs — Linux hosts only.
         # Building the ARM kernel requires a Linux build environment; Darwin

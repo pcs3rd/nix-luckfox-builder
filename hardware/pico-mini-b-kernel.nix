@@ -8,7 +8,7 @@
 #
 # ── Usage ────────────────────────────────────────────────────────────────────
 #
-# In configurations/sdimage-ab.nix (or any other real-hardware config):
+# In configurations/sdimage.nix (or any other real-hardware config):
 #
 #   imports = [ ../configuration.nix ../hardware/pico-mini-b-kernel.nix ];
 #

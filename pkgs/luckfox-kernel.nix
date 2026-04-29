@@ -123,20 +123,20 @@ let
   # This is safer than patching every Makefile/Kconfig call site because the
   # wrapper is invoked from multiple places (Makefile CC=, init/Kconfig shell
   # expansions, scripts/Makefile.compiler, etc.).
+  # Shell passthrough — avoids needing /usr/bin/env or Python in the sandbox.
+  # /bin/sh is always available; Python is not guaranteed in early build phases.
+  #
+  # Called as:  scripts/gcc-wrapper.py <compiler> [flags...]
+  # Effect:     exec <compiler> [flags...]
   gccWrapperPy = builtins.toFile "gcc-wrapper.py" ''
-    #!/usr/bin/env python3
-    """Passthrough: exec the first argument with the remaining arguments.
-
-    The Luckfox SDK calls this as:
-        scripts/gcc-wrapper.py $(CROSS_COMPILE)gcc [flags...]
-    We simply exec the real compiler so all flag/version queries work normally.
-    """
-    import os, sys
-    if len(sys.argv) < 2:
-        # Called with no compiler — nothing to do.
-        sys.exit(0)
-    compiler = sys.argv[1]
-    os.execv(compiler, sys.argv[1:])
+    #!/bin/sh
+    # Passthrough wrapper — exec the real compiler with all remaining flags.
+    # The Luckfox SDK calls this as:
+    #   scripts/gcc-wrapper.py $(CROSS_COMPILE)gcc [flags...]
+    if [ $# -eq 0 ]; then exit 0; fi
+    compiler="$1"
+    shift
+    exec "$compiler" "$@"
   '';
 
 in
