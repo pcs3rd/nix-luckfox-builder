@@ -27,7 +27,7 @@
 
 let
   LUCKFOX_REV    = "824b817f889c2cbff1d48fcdb18ab494a68f69d1";
-  LUCKFOX_SHA256 = "sha256-M+8/A5htxSvfAVTrMrUrDE20h3ffcAgiPASkm6XjGsU=";
+  LUCKFOX_SHA256 = "sha256-t0kiuP76j/D9i8l+o6JsYrDwUJjD/3cE3WBC+5TN2Lk=";
 
   KERNEL_DEFCONFIG = "luckfox_pico_mini_b_defconfig";
 
