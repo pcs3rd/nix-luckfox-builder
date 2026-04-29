@@ -68,13 +68,28 @@ pkgs.stdenv.mkDerivation {
   ];
 
   configurePhase = ''
-    # The Luckfox-specific defconfig lives in the SDK overlay directory, not in
-    # u-boot/configs/.  The SDK Makefile copies it there before building; we
-    # do the same.
-    # Path: sourceRoot = sysdrv/source/uboot/u-boot
-    #       defconfig  = sysdrv/tools/board/uboot/luckfox_rv1106_uboot_defconfig
-    #       relative   = ../../../tools/board/uboot/luckfox_rv1106_uboot_defconfig
-    cp ../../../tools/board/uboot/luckfox_rv1106_uboot_defconfig configs/
+    # The Luckfox-specific defconfig may live in the SDK overlay directory or
+    # already be present in u-boot/configs/ depending on the SDK revision.
+    #
+    # SDK revisions where it lives in the overlay:
+    #   sysdrv/tools/board/uboot/luckfox_rv1106_uboot_defconfig
+    #   (relative from sourceRoot: ../../../tools/board/uboot/...)
+    #
+    # Newer revisions ship it directly in u-boot/configs/ — no copy needed.
+    echo "=== searching for luckfox_rv1106_uboot_defconfig ==="
+    if [ -f ../../../tools/board/uboot/luckfox_rv1106_uboot_defconfig ]; then
+      echo "Found in SDK overlay — copying to configs/"
+      cp ../../../tools/board/uboot/luckfox_rv1106_uboot_defconfig configs/
+    elif [ -f configs/luckfox_rv1106_uboot_defconfig ]; then
+      echo "Already in configs/ — no copy needed"
+    else
+      echo "=== Available defconfigs ==="
+      ls configs/ | grep -i 'luckfox\|rv110[36]' || true
+      echo "=== SDK overlay board dir (if present) ==="
+      ls ../../../tools/board/ 2>/dev/null || true
+      echo "ERROR: luckfox_rv1106_uboot_defconfig not found in SDK overlay or u-boot/configs/"
+      exit 1
+    fi
 
     make \
       ARCH=arm \
