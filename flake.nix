@@ -183,6 +183,48 @@
       # and modules/core/sdimage.nix — no separate -ab configuration needed.
       picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;    };
 
+      # ── SPI NOR image ──────────────────────────────────────────────────────────
+      #
+      # 8 MiB blank image with the SPL written at offset 0x8000 (the Rockchip
+      # boot ROM always reads from this offset on SPI NOR).  Flash this to the
+      # onboard SPI flash so the board boots from SD card without holding BOOT.
+      spiImage =
+        let uboot = picoMiniB.config.system.build.uboot;
+        in hostPkgs.runCommand "luckfox-spi.img" {} ''
+          mkdir -p $out
+          # 8 MiB blank image (matches the onboard Winbond W25Q64 / similar)
+          dd if=/dev/zero of=$out/spi.img bs=1M count=8 2>/dev/null
+          # SPL at byte offset 0x8000 (sector 64 × 512 B — same as SD card)
+          dd if=${uboot}/SPL of=$out/spi.img \
+            bs=1 seek=$((0x8000)) conv=notrunc 2>/dev/null
+          echo "SPI image: $(du -sh $out/spi.img | cut -f1)"
+          echo "SPL size:  $(du -sh ${uboot}/SPL  | cut -f1)"
+        '';
+
+      # ── Flash bundle ────────────────────────────────────────────────────────────
+      #
+      # Collects everything needed to flash the board into one output directory:
+      #   SPL              — raw miniloader binary for `rkdeveloptool db`
+      #   spi.img          — 8 MiB SPI NOR image for `rkdeveloptool wf`
+      #   sd-flashable.img — full SD card image for `dd`
+      #
+      # Usage:
+      #   nix build .#flash-bundle
+      #   # Flash SPI NOR (maskrom mode — hold BOOT, plug USB):
+      #   rkdeveloptool db result/SPL
+      #   rkdeveloptool ef
+      #   rkdeveloptool wf result/spi.img
+      #   rkdeveloptool rd
+      #   # Flash SD card:
+      #   sudo dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
+      flashBundle = hostPkgs.runCommand "luckfox-flash-bundle" {} ''
+        mkdir -p $out
+        cp ${picoMiniB.config.system.build.uboot}/SPL              $out/SPL
+        cp ${spiImage}/spi.img                                     $out/spi.img
+        cp ${picoMiniB-sdimage.config.system.build.sdImage}/sd-flashable.img \
+                                                                   $out/sd-flashable.img
+      '';
+
       # ── QEMU test disk (read-only ext4 image of the rootfs) ─────────────────
       qemu-test-disk = hostPkgs.runCommand "luckfox-test.img" {
         nativeBuildInputs = [ hostPkgs.e2fsprogs ];
@@ -584,37 +626,16 @@ RUNEOF
         rootfs            = picoMiniB.config.system.build.rootfs;
         uboot             = picoMiniB.config.system.build.uboot;
 
-        # Raw 8 MiB SPI NOR image — flash this to the onboard SPI flash so the
-        # board boots from SD card without holding the BOOT button every time.
-        #
-        # RV1103/RV1106 SPI NOR layout:
-        #   0x00000–0x07FFF  reserved (32 KB)
-        #   0x08000          SPL / Rockchip miniloader  ← written here
-        #
-        # The SPL (built without CONFIG_SPL_SPI_FLASH_SUPPORT) loads U-Boot from
-        # the SD card via MMC — SPI NOR only needs to hold the SPL itself.
-        #
-        # Flash with rkdeveloptool in maskrom mode (hold BOOT, plug in USB):
-        #   nix build .#spi-image
-        #   rkdeveloptool db result/SPL       # init DRAM
-        #   rkdeveloptool ef                  # erase SPI NOR
-        #   rkdeveloptool wf result/spi.img   # write raw image
-        #   rkdeveloptool rd                  # reset
-        #
-        # After this, the board boots from SD card on every power-on with no
-        # button held.  To restore factory firmware, re-flash with Luckfox tools.
-        spi-image =
-          let uboot = picoMiniB.config.system.build.uboot;
-          in hostPkgs.runCommand "luckfox-spi.img" {} ''
-            mkdir -p $out
-            # 8 MiB blank image (matches the onboard Winbond W25Q64 / similar)
-            dd if=/dev/zero of=$out/spi.img bs=1M count=8 2>/dev/null
-            # SPL at byte offset 0x8000 (sector 64 × 512 B — same as SD card)
-            dd if=${uboot}/SPL of=$out/spi.img \
-              bs=1 seek=$((0x8000)) conv=notrunc 2>/dev/null
-            echo "SPI image: $(du -sh $out/spi.img | cut -f1)"
-            echo "SPL size:  $(du -sh ${uboot}/SPL  | cut -f1)"
-          '';
+        # Raw 8 MiB SPI NOR image — flash to the onboard SPI flash so the board
+        # boots from SD card without holding BOOT.  See flash-bundle for a single
+        # target that collects SPL + spi.img + sd-flashable.img together.
+        spi-image    = spiImage;
+
+        # Everything needed to flash the board in one output directory:
+        #   SPL              — raw SPL for `rkdeveloptool db`
+        #   spi.img          — SPI NOR image for `rkdeveloptool wf`
+        #   sd-flashable.img — full SD card image for `dd`
+        flash-bundle = flashBundle;
         # Kernel built from SDK source (zImage + DTBs + modules).
         # Inspect result/dtbs/ to find the correct DTB name for hardware/pico-mini-b.nix.
         luckfox-kernel    = import ./pkgs/luckfox-kernel.nix { inherit pkgs; };

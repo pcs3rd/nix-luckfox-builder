@@ -111,12 +111,22 @@ ssh root@luckfox
 Flashing a small bootloader stub (SPL) to the onboard SPI NOR lets the board
 boot from SD card automatically on every power-on — no button required.
 
-**Build the SPI image:**
+**Build both outputs:**
 
 ```sh
+# The SPI image to write to flash
 nix build .#spi-image
 # Produces result/spi.img (8 MiB raw image, SPL at offset 0x8000)
+
+# The raw SPL binary needed to initialise DRAM before flashing
+nix build .#uboot
+# Produces result/SPL  ← this is what rkdeveloptool db expects
 ```
+
+> **Important:** `rkdeveloptool db` takes the **raw SPL binary** (`result/SPL`),
+> not the SPI image. The two are different: `result/SPL` is a miniloader the
+> boot ROM can parse to bring up DRAM; `result/spi.img` is the full 8 MiB image
+> you write to the flash afterward.
 
 **Flash with `rkdeveloptool`:**
 
@@ -125,18 +135,15 @@ nix build .#spi-image
 # 2. Verify the device is visible
 rkdeveloptool ld
 
-# 3. Flash
-rkdeveloptool db result/SPL        # upload SPL to initialise DRAM (required first)
+# 3. Flash (run nix build steps above first)
+rkdeveloptool db result/SPL        # upload raw SPL to initialise DRAM
 rkdeveloptool ef                   # erase SPI NOR
-rkdeveloptool wf result/spi.img    # write the 8 MiB raw image
+rkdeveloptool wf result/spi.img    # write the 8 MiB SPI image
 rkdeveloptool rd                   # reset
 
 # Install rkdeveloptool if needed:
 nix-shell -p rkdeveloptool
 ```
-
-`result/SPL` is also available standalone via `nix build .#uboot`
-(appears at `result/SPL` alongside `result/u-boot.img`).
 
 After flashing, the board boots from SD card automatically on every
 power-on. To restore the factory Luckfox firmware, re-flash using the

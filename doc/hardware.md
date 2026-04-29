@@ -89,12 +89,21 @@ Flashing the SPL to SPI NOR makes the board boot from SD card automatically
 on every power-on. The SPI NOR only needs to hold the SPL (~200 KB); U-Boot
 and the kernel remain on the SD card.
 
-**Build the SPI image:**
+**Build both outputs:**
 
 ```sh
+# The SPI image to write to flash
 nix build .#spi-image
 # Produces result/spi.img (8 MiB raw image, SPL at offset 0x8000)
+
+# The raw SPL binary needed to initialise DRAM before flashing
+nix build .#uboot
+# Produces result/SPL  ← this is what rkdeveloptool db expects
 ```
+
+> **Important:** `rkdeveloptool db` takes the **raw SPL binary** (`result/SPL`),
+> not the SPI image. `result/SPL` is a miniloader the boot ROM uses to bring
+> up DRAM; `result/spi.img` is the full 8 MiB image written to flash afterward.
 
 **Flash with `rkdeveloptool`:**
 
@@ -103,10 +112,10 @@ nix build .#spi-image
 # 2. Verify the device is visible
 rkdeveloptool ld
 
-# 3. Flash
-rkdeveloptool db result/SPL        # upload SPL to initialise DRAM (required first)
+# 3. Flash (run nix build steps above first)
+rkdeveloptool db result/SPL        # upload raw SPL to initialise DRAM
 rkdeveloptool ef                   # erase SPI NOR
-rkdeveloptool wf result/spi.img    # write the 8 MiB raw image
+rkdeveloptool wf result/spi.img    # write the 8 MiB SPI image
 rkdeveloptool rd                   # reset
 
 # Install rkdeveloptool if needed:
@@ -116,7 +125,3 @@ nix-shell -p rkdeveloptool
 After flashing, the board boots from SD card on every power-on with no
 button held. To restore the factory Luckfox firmware, re-flash using the
 Luckfox SDK tools via the same maskrom procedure.
-
-> **Note:** `result/SPL` (used in the `db` step) is also available as a
-> standalone build target via `nix build .#uboot` — it appears at
-> `result/SPL` alongside `result/u-boot.img`.

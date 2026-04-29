@@ -16,6 +16,7 @@ in
 pkgs.mkShell {
   packages = [
     claudeCode
+    pkgs.rkdeveloptool
   ];
 
   shellHook = ''
