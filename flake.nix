@@ -204,14 +204,18 @@
       # ── Flash bundle ────────────────────────────────────────────────────────────
       #
       # Collects everything needed to flash the board into one output directory:
-      #   SPL              — raw miniloader binary for `rkdeveloptool db`
-      #   spi.img          — 8 MiB SPI NOR image for `rkdeveloptool wf`
-      #   sd-flashable.img — full SD card image for `dd`
+      #
+      #   rv1106_miniloader.bin — Rockchip USB download loader for `rkdeveloptool db`
+      #                           (initialises DRAM over USB; never written to storage)
+      #   SPL                   — U-Boot idbloader written into spi.img and sd-flashable.img
+      #                           (NOT for rkdeveloptool db — different format)
+      #   spi.img               — 8 MiB SPI NOR image for `rkdeveloptool wf`
+      #   sd-flashable.img      — full SD card image for `dd`
       #
       # Usage:
       #   nix build .#flash-bundle
       #   # Flash SPI NOR (maskrom mode — hold BOOT, plug USB):
-      #   rkdeveloptool db result/SPL
+      #   rkdeveloptool db result/rv1106_miniloader.bin
       #   rkdeveloptool ef
       #   rkdeveloptool wf result/spi.img
       #   rkdeveloptool rd
@@ -220,6 +224,8 @@
       flashBundle = hostPkgs.runCommand "luckfox-flash-bundle" {} ''
         mkdir -p $out
         cp ${picoMiniB.config.system.build.uboot}/SPL              $out/SPL
+        cp ${picoMiniB.config.system.build.uboot}/rv1106_miniloader.bin \
+                                                                   $out/rv1106_miniloader.bin
         cp ${spiImage}/spi.img                                     $out/spi.img
         cp ${picoMiniB-sdimage.config.system.build.sdImage}/sd-flashable.img \
                                                                    $out/sd-flashable.img
@@ -632,9 +638,10 @@ RUNEOF
         spi-image    = spiImage;
 
         # Everything needed to flash the board in one output directory:
-        #   SPL              — raw SPL for `rkdeveloptool db`
-        #   spi.img          — SPI NOR image for `rkdeveloptool wf`
-        #   sd-flashable.img — full SD card image for `dd`
+        #   rv1106_miniloader.bin — Rockchip USB loader for `rkdeveloptool db`
+        #   spi.img               — SPI NOR image for `rkdeveloptool wf`
+        #   sd-flashable.img      — full SD card image for `dd`
+        #   SPL                   — U-Boot idbloader (embedded in the above; for reference)
         flash-bundle = flashBundle;
         # Kernel built from SDK source (zImage + DTBs + modules).
         # Inspect result/dtbs/ to find the correct DTB name for hardware/pico-mini-b.nix.

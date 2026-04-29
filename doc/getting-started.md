@@ -42,8 +42,9 @@ nix build .#packages.aarch64-darwin.flash-bundle
 | File | Used for |
 |---|---|
 | `result/sd-flashable.img` | Writing to the SD card (Step 2) |
-| `result/SPL` | Initialising DRAM via `rkdeveloptool db` (optional SPI NOR step) |
-| `result/spi.img` | Writing the bootloader to SPI NOR (optional SPI NOR step) |
+| `result/rv1106_miniloader.bin` | `rkdeveloptool db` — initialises DRAM over USB during SPI NOR flashing |
+| `result/spi.img` | `rkdeveloptool wf` — the 8 MiB image written to SPI NOR |
+| `result/SPL` | U-Boot idbloader embedded inside `spi.img` and `sd-flashable.img`; not used directly |
 
 If you only need the SD card image and don't plan to flash SPI NOR, you can
 build just that target instead:
@@ -144,10 +145,10 @@ nix build .#flash-bundle   # includes SPL, spi.img, and sd-flashable.img
 rkdeveloptool ld
 
 # 3. Flash
-rkdeveloptool db result/SPL        # upload raw SPL to initialise DRAM
-rkdeveloptool ef                   # erase SPI NOR
-rkdeveloptool wf result/spi.img    # write the 8 MiB SPI image
-rkdeveloptool rd                   # reset
+rkdeveloptool db result/rv1106_miniloader.bin   # upload miniloader to initialise DRAM
+rkdeveloptool ef                                # erase SPI NOR
+rkdeveloptool wf result/spi.img                 # write the 8 MiB SPI image
+rkdeveloptool rd                                # reset
 
 # Install rkdeveloptool if needed (or use nix-shell from this repo's shell.nix):
 nix-shell -p rkdeveloptool
