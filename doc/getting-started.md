@@ -22,23 +22,35 @@ On Apple Silicon, you also need the [nix-darwin Linux builder](https://nixos.org
 
 ---
 
-## Step 1 — Build the SD image
+## Step 1 — Build
 
 ```sh
 git clone https://github.com/youruser/nix-luckfox-builder
 cd nix-luckfox-builder
 
-nix build .#sdImage-flashable
+nix build .#flash-bundle
 ```
 
 On Apple Silicon, prefix the target:
 
 ```sh
-nix build .#packages.aarch64-darwin.sdImage-flashable
+nix build .#packages.aarch64-darwin.flash-bundle
 ```
 
-This produces `result/sd-flashable.img` — a raw disk image containing the
-bootloader, kernel, A/B rootfs slots, and a persist partition.
+`flash-bundle` builds everything in one shot and produces three files:
+
+| File | Used for |
+|---|---|
+| `result/sd-flashable.img` | Writing to the SD card (Step 2) |
+| `result/SPL` | Initialising DRAM via `rkdeveloptool db` (optional SPI NOR step) |
+| `result/spi.img` | Writing the bootloader to SPI NOR (optional SPI NOR step) |
+
+If you only need the SD card image and don't plan to flash SPI NOR, you can
+build just that target instead:
+
+```sh
+nix build .#sdImage-flashable
+```
 
 ---
 
@@ -111,16 +123,12 @@ ssh root@luckfox
 Flashing a small bootloader stub (SPL) to the onboard SPI NOR lets the board
 boot from SD card automatically on every power-on — no button required.
 
-**Build both outputs:**
+If you built `flash-bundle` in Step 1, you already have everything you need —
+`result/SPL` and `result/spi.img` are both in the same `result/` directory.
+Otherwise build them now:
 
 ```sh
-# The SPI image to write to flash
-nix build .#spi-image
-# Produces result/spi.img (8 MiB raw image, SPL at offset 0x8000)
-
-# The raw SPL binary needed to initialise DRAM before flashing
-nix build .#uboot
-# Produces result/SPL  ← this is what rkdeveloptool db expects
+nix build .#flash-bundle   # includes SPL, spi.img, and sd-flashable.img
 ```
 
 > **Important:** `rkdeveloptool db` takes the **raw SPL binary** (`result/SPL`),
@@ -135,13 +143,13 @@ nix build .#uboot
 # 2. Verify the device is visible
 rkdeveloptool ld
 
-# 3. Flash (run nix build steps above first)
+# 3. Flash
 rkdeveloptool db result/SPL        # upload raw SPL to initialise DRAM
 rkdeveloptool ef                   # erase SPI NOR
 rkdeveloptool wf result/spi.img    # write the 8 MiB SPI image
 rkdeveloptool rd                   # reset
 
-# Install rkdeveloptool if needed:
+# Install rkdeveloptool if needed (or use nix-shell from this repo's shell.nix):
 nix-shell -p rkdeveloptool
 ```
 
