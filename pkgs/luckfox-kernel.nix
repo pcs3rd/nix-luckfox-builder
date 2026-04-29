@@ -208,7 +208,12 @@ pkgs.stdenv.mkDerivation {
     # an optional build-time optimisation that pre-sorts the kernel exception
     # table; without it, the kernel sorts it at boot time in sort_main_extable().
     # Both paths produce identical runtime behaviour; boot overhead is negligible.
+    #
+    # Two places reference it:
+    #   scripts/Makefile        — declares it as a host program to build
+    #   scripts/link-vmlinux.sh — calls ./scripts/sorttable vmlinux after link
     sed -i '/sorttable/d' scripts/Makefile
+    sed -i '/sorttable/d' scripts/link-vmlinux.sh
 
     # ── Force-add Luckfox Pico board DTS files to the build ───────────────────
     #
