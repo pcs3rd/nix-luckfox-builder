@@ -195,6 +195,25 @@ pkgs.stdenv.mkDerivation {
     chmod +x scripts/clang-version.sh
 
     echo "patched: gcc-wrapper.py gcc-version.sh ld-version.sh clang-version.sh"
+
+    # ── Force-add Luckfox Pico board DTS files to the build ───────────────────
+    #
+    # rv1106_defconfig compiles only its own board list; Pico Mini B DTS files
+    # exist in some SDK revisions but aren't referenced by that defconfig.
+    # If the source is present we add them to arch/arm/boot/dts/Makefile so
+    # they're compiled alongside the rest of the DTBs.
+    for dts in \
+        arch/arm/boot/dts/rv1103-luckfox-pico-mini-b.dts \
+        arch/arm/boot/dts/rv1103-luckfox-pico.dts \
+        arch/arm/boot/dts/rv1106-luckfox-pico-mini-b.dts \
+        arch/arm/boot/dts/luckfox-pico-mini-b.dts; do
+      if [ -f "$dts" ]; then
+        dtb="$(basename "$dts" .dts).dtb"
+        grep -qF "$dtb" arch/arm/boot/dts/Makefile \
+          || echo "dtb-y += $dtb" >> arch/arm/boot/dts/Makefile
+        echo "Added $dtb to DTS Makefile"
+      fi
+    done
   '';
 
   configurePhase = ''

@@ -12,28 +12,40 @@
 #
 #   imports = [ ../configuration.nix ../hardware/pico-mini-b-kernel.nix ];
 #
-# ── DTB name ─────────────────────────────────────────────────────────────────
+# ── DTB selection ─────────────────────────────────────────────────────────────
 #
-# After the first build, inspect the generated DTBs to confirm the filename:
+# The SDK's rv1106_defconfig builds generic RV1103G/RV1106G evaluation-board
+# DTBs; board-specific Luckfox Pico files are added in postPatch (see
+# pkgs/luckfox-kernel.nix) if the DTS source exists in the chosen revision.
 #
+# To confirm what DTBs are available after a build:
 #   nix build .#luckfox-kernel && ls result/dtbs/
 #
-# Common values for the Pico Mini B:
-#   rv1103-luckfox-pico-mini-b.dtb
-#   rv1106-luckfox-pico-mini-b.dtb
-#   luckfox-pico-mini-b.dtb
+# ── DTB hierarchy (first existing file wins at runtime) ───────────────────────
 #
-# Update device.dtb below if the name differs.
+#   rv1103-luckfox-pico-mini-b.dtb   ← board-specific, built if DTS present
+#   rv1103g-evb-v10.dtb              ← RV1103G EVB fallback (always built)
+#
+# The sdimage builder copies whichever path device.dtb points at; if it
+# doesn't exist the build fails with a clear "No such file" error — inspect
+# result/dtbs/ and update device.dtb accordingly.
 
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 
 let
   luckfoxKernel = import ../pkgs/luckfox-kernel.nix { inherit pkgs; };
+
+  # Prefer the board-specific DTB; fall back to the generic RV1103G EVB tree.
+  # The EVB pinout is close enough to the Pico Mini B for initial bring-up;
+  # replace with a proper board DTS once one is available for this SDK revision.
+  dtbName =
+    if builtins.pathExists "${luckfoxKernel}/dtbs/rv1103-luckfox-pico-mini-b.dtb"
+    then "rv1103-luckfox-pico-mini-b.dtb"
+    else "rv1103g-evb-v10.dtb";
 in
 
 {
   device.kernel            = "${luckfoxKernel}/zImage";
-  device.dtb               = "${luckfoxKernel}/dtbs/rv1103-luckfox-pico-mini-b.dtb";
-  # Enable kernel modules (required for =m drivers like zram):
+  device.dtb               = "${luckfoxKernel}/dtbs/${dtbName}";
   device.kernelModulesPath = "${luckfoxKernel}/lib/modules";
 }
