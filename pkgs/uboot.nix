@@ -155,50 +155,106 @@ pkgs.stdenv.mkDerivation {
     # ── Diagnostics ───────────────────────────────────────────────────────────
     echo "=== U-Boot build artifacts ==="
     find . -maxdepth 3 \
-      \( -name "*.img" -o -name "*.bin" -o -name "SPL" -o -name "uboot.img" \) \
+      \( -name "*.img" -o -name "*.bin" -o -name "SPL" -o -name "idbloader.img" \) \
       -not -path "*/arch/*" -not -path "*/board/*" | sort
 
-    # ── SPL / idbloader ───────────────────────────────────────────────────────
-    # mkimage -T rksd rejects spl/u-boot-spl.bin because the rv1126 SRAM limit
-    # is 0xf000 (60 KB) but the built SPL is ~166 KB.  The SDK make.sh uses
-    # rkbin/tools/loaderimage which handles the two-stage load: the DDR init
-    # blob runs from SRAM, then the SPL is loaded into DDR and executed.
-    # loaderimage is an x86_64 ELF binary in the fetched source tree.
-    if [ -f SPL ]; then
-      cp SPL $out/SPL
+    # ── idbloader / SPL (SD card / SPI boot format) ───────────────────────────
+    #
+    # CRITICAL FORMAT DISTINCTION:
+    #   idbloader format  = what the Rockchip boot ROM reads from SD card sector 64
+    #                       (or from SPI NOR at offset 0x8000).  Written to $out/SPL.
+    #   LOADER format     = what `rkdeveloptool db` uploads over USB.
+    #                       Different binary layout — NEVER use for SD/SPI boot.
+    #
+    # loaderimage --pack --uboot produces LOADER format (USB download only).
+    # For SD/SPI boot we need idbloader format, built with mkimage -T rksd.
+    #
+    # The idbloader bundles two blobs end-to-end:
+    #   1. DDR init blob (runs from on-chip SRAM, initialises DRAM)
+    #   2. SPL binary    (loaded into DRAM by DDR init, chains to U-Boot proper)
+    #
+    # Strategy 1 — some Rockchip defconfigs emit idbloader.img during make.
+    if [ -f idbloader.img ]; then
+      echo "Strategy 1: using build-generated idbloader.img"
+      cp idbloader.img $out/SPL
+
+    # Strategy 2 — build idbloader from DDR blob + SPL using tools/mkimage -T rksd.
+    # tools/mkimage is compiled as a host binary during the main U-Boot build;
+    # the -n rv1106 flag selects the correct header for this chip family.
+    elif [ -f tools/mkimage ] && [ -f rv1106_ddr.bin ] && [ -f spl/u-boot-spl.bin ]; then
+      echo "Strategy 2: building idbloader with mkimage -T rksd (DDR blob + built SPL)"
+      ./tools/mkimage -n rv1106 -T rksd \
+        -d ./rv1106_ddr.bin:spl/u-boot-spl.bin \
+        $out/SPL
+      echo "idbloader size: $(du -sh $out/SPL | cut -f1)"
+
+    # Strategy 3 — fall back to the SDK's pre-built idblock.img from project/image/.
+    # These are identical to the binaries in the Luckfox Ubuntu demo image and are
+    # verified to boot on real RV1103 hardware.
+    # sourceRoot is source/sysdrv/source/uboot/u-boot; go up 4 dirs to source/.
     else
-      # loaderimage is a proprietary x86_64 ELF in the rkbin tree.  It has a
-      # hardcoded /lib64/ld-linux-x86-64.so.2 interpreter that doesn't exist
-      # in the Nix build sandbox.  Patch it to use the actual Nix store linker.
-      # The Nix store is read-only; copy loaderimage to the build dir before patching.
-      cp ../rkbin/tools/loaderimage ./loaderimage
-      chmod 755 ./loaderimage   # cp preserves the store's r-x bits; patchelf needs w
-      # Extract the ELF interpreter from a known-working binary (patchelf itself)
-      # using its Nix store path directly — 'which' is not available in the sandbox.
-      interp=$(patchelf --print-interpreter "${pkgs.buildPackages.patchelf}/bin/patchelf")
-      patchelf --set-interpreter "$interp" ./loaderimage
-
-      echo "=== loaderimage usage ==="
-      ./loaderimage --help 2>&1 || true
-
-      echo "=== packing SPL ==="
-      # loaderimage creates a Rockchip miniloader image where the DDR init code
-      # runs from SRAM then loads the SPL into DDR.  0x400000 is the DDR
-      # load/run address for the RV1106 SPL (matches CONFIG_SPL_TEXT_BASE).
-      ./loaderimage --pack --uboot spl/u-boot-spl.bin $out/SPL 0x400000
+      echo "Strategy 3: searching SDK project/image/ for pre-built idblock.img..."
+      FOUND=""
+      for d in ../../../../project/image/*/; do
+        if [ -f "$d/idblock.img" ]; then
+          FOUND="$d/idblock.img"
+          echo "  Using: $d/idblock.img"
+          break
+        fi
+      done
+      if [ -z "$FOUND" ]; then
+        echo "ERROR: Cannot produce an idbloader by any strategy:" >&2
+        echo "  1. No idbloader.img emitted by U-Boot build" >&2
+        echo "  2. tools/mkimage, rv1106_ddr.bin, or spl/u-boot-spl.bin missing" >&2
+        echo "     (found: $(ls tools/mkimage rv1106_ddr.bin spl/u-boot-spl.bin 2>&1))" >&2
+        echo "  3. No idblock.img under ../../../../project/image/*/" >&2
+        echo "" >&2
+        echo "Build artifacts present:" >&2
+        find . -maxdepth 3 -name "*.bin" -o -name "*.img" 2>/dev/null | head -30 >&2
+        exit 1
+      fi
+      cp "$FOUND" $out/SPL
     fi
+
+    # idblock.img is the conventional SDK name for the idbloader.
+    # Provide it as an alias so flash scripts can reference either name.
+    ln -s SPL $out/idblock.img
 
     # ── Main U-Boot binary ────────────────────────────────────────────────────
     if [ -f u-boot.img ]; then
       cp u-boot.img $out/u-boot.img
     else
-      cp u-boot.bin $out/u-boot.bin
+      cp u-boot.bin $out/u-boot.img
     fi
 
-    # Note: rv1106_miniloader.bin is NOT copied here.
-    # It is fetched as a separate fetchurl derivation in flake.nix (rv1106Miniloader)
-    # because the pinned SDK revision does not include it in its rkbin directory.
-    # flash-bundle copies it from there directly.
+    # ── USB download loader (LOADER format for `rkdeveloptool db`) ────────────
+    #
+    # This is LOADER format — the binary rkdeveloptool db uploads over USB to
+    # initialise DRAM and present the USB flash interface.  It is NOT written
+    # to storage; it only lives in DRAM for the duration of the flash session.
+    #
+    # Try SDK's pre-built download.bin first (same binary in Ubuntu demo image),
+    # then fall back to generating one with loaderimage (which correctly produces
+    # LOADER format, despite that being wrong for SD boot).
+    FOUND_DL=""
+    for d in ../../../../project/image/*/; do
+      if [ -f "$d/download.bin" ]; then
+        FOUND_DL="$d/download.bin"
+        break
+      fi
+    done
+
+    if [ -n "$FOUND_DL" ]; then
+      echo "USB download loader: using pre-built $FOUND_DL"
+      cp "$FOUND_DL" $out/download.bin
+    else
+      echo "USB download loader: generating with loaderimage (LOADER format)..."
+      cp ../rkbin/tools/loaderimage ./loaderimage
+      chmod 755 ./loaderimage
+      interp=$(patchelf --print-interpreter "${pkgs.buildPackages.patchelf}/bin/patchelf")
+      patchelf --set-interpreter "$interp" ./loaderimage
+      ./loaderimage --pack --uboot spl/u-boot-spl.bin $out/download.bin 0x400000
+    fi
   '';
 
   meta = {

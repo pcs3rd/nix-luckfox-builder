@@ -153,6 +153,11 @@
           in "${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d}";
       };
 
+      # Raw U-Boot derivation — exposes SPL (idbloader), u-boot.img, and download.bin.
+      # system.build.uboot (from modules/core/uboot.nix) only re-exports SPL + u-boot.bin;
+      # import pkgs/uboot.nix directly to get the full output including download.bin.
+      luckfoxUboot = import ./pkgs/uboot.nix { inherit pkgs; };
+
       # ── System evaluations ──────────────────────────────────────────────────
       picoMiniB         = mkSystem   { configuration = ./configuration.nix;             };
       picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix;  };
@@ -212,16 +217,16 @@
       # boot ROM always reads from this offset on SPI NOR).  Flash this to the
       # onboard SPI flash so the board boots from SD card without holding BOOT.
       spiImage =
-        let uboot = picoMiniB.config.system.build.uboot;
-        in hostPkgs.runCommand "luckfox-spi.img" {} ''
+        hostPkgs.runCommand "luckfox-spi.img" {} ''
           mkdir -p $out
           # 8 MiB blank image (matches the onboard Winbond W25Q64 / similar)
           dd if=/dev/zero of=$out/spi.img bs=1M count=8 2>/dev/null
-          # SPL at byte offset 0x8000 (sector 64 × 512 B — same as SD card)
-          dd if=${uboot}/SPL of=$out/spi.img \
+          # idbloader (SPL) at byte offset 0x8000 (sector 64 × 512 B).
+          # The SPI NOR boot ROM reads the idbloader from this same offset.
+          dd if=${luckfoxUboot}/SPL of=$out/spi.img \
             bs=1 seek=$((0x8000)) conv=notrunc 2>/dev/null
           echo "SPI image: $(du -sh $out/spi.img | cut -f1)"
-          echo "SPL size:  $(du -sh ${uboot}/SPL  | cut -f1)"
+          echo "SPL size:  $(du -sh ${luckfoxUboot}/SPL | cut -f1)"
         '';
 
       # ── Flash bundle ────────────────────────────────────────────────────────────
@@ -246,7 +251,12 @@
       #   sudo dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
       flashBundle = hostPkgs.runCommand "luckfox-flash-bundle" {} ''
         mkdir -p $out
-        cp ${picoMiniB.config.system.build.uboot}/SPL              $out/SPL
+        cp ${luckfoxUboot}/SPL                                      $out/SPL
+        cp ${luckfoxUboot}/u-boot.img                              $out/u-boot.img
+        # USB download loaders — either works with `rkdeveloptool db`:
+        #   download.bin          — from the SDK's project/image/ (same as Ubuntu demo)
+        #   rv1106_miniloader.bin — from rockchip-linux/rkbin
+        cp ${luckfoxUboot}/download.bin                            $out/download.bin
         cp ${rv1106Miniloader}                                      $out/rv1106_miniloader.bin
         cp ${spiImage}/spi.img                                      $out/spi.img
         cp ${picoMiniB-sdimage.config.system.build.sdImage}/sd-flashable.img \
@@ -268,29 +278,56 @@
         mkdir -p $out
         cp ${picoMiniA-sdimage.config.system.build.sdImage}/sd-flashable.img \
                                                                     $out/sd-flashable.img
+        # USB download loader — for recovery when SD card boot fails.
+        # Use with: rkdeveloptool db download.bin   (board in maskrom mode)
+        # Then:     rkdeveloptool wl 0 sd-flashable.img
+        cp ${luckfoxUboot}/download.bin                            $out/download.bin
         # Write instructions
         cat > $out/FLASH.txt << 'EOF'
 Luckfox Pico Mini A — Flash Instructions
 ==========================================
 
-The Mini A has NO SPI flash. Just write the SD card image directly.
+The Mini A has NO SPI flash. Write the SD card image directly with dd.
+
+── Normal flash (SD card) ────────────────────────────────────────────────
 
 macOS:
   diskutil list                            # find SD card (e.g. /dev/disk4)
   diskutil unmountDisk /dev/disk4
   sudo dd if=sd-flashable.img of=/dev/rdisk4 bs=4m status=progress
+  # Note: use rdiskN (raw device) on macOS — not diskN — for reliable writes
 
 Linux:
   lsblk                                   # find SD card (e.g. /dev/sdb)
   sudo dd if=sd-flashable.img of=/dev/sdb bs=4M status=progress
 
-Verify the write (sector 64 = SPL, should have Rockchip loader magic):
-  sudo dd if=/dev/rdisk4 bs=512 skip=64 count=1 2>/dev/null | xxd | head -2
+Verify the write (sector 64 = idbloader, should have Rockchip magic 00000000):
+  sudo dd if=/dev/rdisk4 bs=512 skip=64 count=1 2>/dev/null | xxd | head -4
 
 Verify MBR (partition table at byte 446, signature 55 aa at byte 510):
   sudo dd if=/dev/rdisk4 bs=1 skip=446 count=66 2>/dev/null | xxd
 
-Serial console (115200 baud) on UART pads shows U-Boot + kernel output.
+── Recovery flash via USB (maskrom mode) ────────────────────────────────
+  If the SD card boot fails, flash directly over USB:
+
+  1. Hold the BOOT button and plug USB-C cable (or short BOOT pad to GND)
+     Board shows in lsusb as: ID 2207:110c  (Rockchip maskrom)
+
+  2. Load the USB download loader into DRAM:
+     rkdeveloptool db download.bin
+
+  3. Write the SD image to the device:
+     rkdeveloptool wl 0 sd-flashable.img
+
+  4. Reset the board:
+     rkdeveloptool rd
+
+  Note: `rkdeveloptool db` expects LOADER format (download.bin), NOT the
+  idbloader format inside sd-flashable.img — these are different formats.
+
+── Serial console ────────────────────────────────────────────────────────
+  Connect a 3.3V USB-serial adapter to the UART pads at 115200 baud.
+  U-Boot and kernel boot messages appear here if the SD card is not booting.
 EOF
       '';
 

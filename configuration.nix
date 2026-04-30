@@ -23,6 +23,8 @@ in
   luckfox = {
     support = true;
     model   = "pico-mini-a";   # "pico-mini-a" | "pico-mini-b"
+    # hostname is set automatically: pico-mini-a → luckfox-mini-a
+    #                                pico-mini-b → luckfox
   };
 
   # ── Extra packages ──────────────────────────────────────────────────────────
@@ -149,7 +151,7 @@ in
   # /etc/issue — shown by getty before the login prompt.
   # \n = hostname, \l = tty, \r = kernel release.
   system.banner = ''
-    Luckfox Pico Mini B — \n  (\l)
+    Luckfox Pico Mini A — \n  (\l)
     Kernel \r  |  Built ${buildDate}
   '';
 
