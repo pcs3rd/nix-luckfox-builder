@@ -22,7 +22,7 @@ in
   # Change model to "pico-mini-a" for the Mini A (no SPI flash).
   luckfox = {
     support = true;
-    model   = "pico-mini-b";   # "pico-mini-a" | "pico-mini-b"
+    model   = "pico-mini-a";   # "pico-mini-a" | "pico-mini-b"
   };
 
   # ── Extra packages ──────────────────────────────────────────────────────────
