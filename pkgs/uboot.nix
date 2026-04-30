@@ -173,48 +173,60 @@ pkgs.stdenv.mkDerivation {
     #   1. DDR init blob (runs from on-chip SRAM, initialises DRAM)
     #   2. SPL binary    (loaded into DRAM by DDR init, chains to U-Boot proper)
     #
+    IDBLOCK=""
+
     # Strategy 1 — some Rockchip defconfigs emit idbloader.img during make.
     if [ -f idbloader.img ]; then
       echo "Strategy 1: using build-generated idbloader.img"
-      cp idbloader.img $out/SPL
+      IDBLOCK="idbloader.img"
+    fi
 
-    # Strategy 2 — build idbloader from DDR blob + SPL using tools/mkimage -T rksd.
-    # tools/mkimage is compiled as a host binary during the main U-Boot build;
-    # the -n rv1106 flag selects the correct header for this chip family.
-    elif [ -f tools/mkimage ] && [ -f rv1106_ddr.bin ] && [ -f spl/u-boot-spl.bin ]; then
-      echo "Strategy 2: building idbloader with mkimage -T rksd (DDR blob + built SPL)"
-      ./tools/mkimage -n rv1106 -T rksd \
-        -d ./rv1106_ddr.bin:spl/u-boot-spl.bin \
-        $out/SPL
-      echo "idbloader size: $(du -sh $out/SPL | cut -f1)"
-
-    # Strategy 3 — fall back to the SDK's pre-built idblock.img from project/image/.
-    # These are identical to the binaries in the Luckfox Ubuntu demo image and are
-    # verified to boot on real RV1103 hardware.
-    # sourceRoot is source/sysdrv/source/uboot/u-boot; go up 4 dirs to source/.
-    else
-      echo "Strategy 3: searching SDK project/image/ for pre-built idblock.img..."
-      FOUND=""
+    # Strategy 2 — SDK pre-built idblock.img from project/image/.
+    # These are identical to the Luckfox Ubuntu demo image binaries and are
+    # verified to boot on real RV1103 hardware.  Preferred over mkimage because
+    # the chip name mapping in this SDK's mkimage may not include rv1106.
+    # sourceRoot = source/sysdrv/source/uboot/u-boot; ../../../../ = source/
+    if [ -z "$IDBLOCK" ]; then
+      echo "Strategy 2: searching SDK project/image/ for pre-built idblock.img..."
       for d in ../../../../project/image/*/; do
         if [ -f "$d/idblock.img" ]; then
-          FOUND="$d/idblock.img"
-          echo "  Using: $d/idblock.img"
+          IDBLOCK="$d/idblock.img"
+          echo "  Found: $d/idblock.img"
           break
         fi
       done
-      if [ -z "$FOUND" ]; then
-        echo "ERROR: Cannot produce an idbloader by any strategy:" >&2
-        echo "  1. No idbloader.img emitted by U-Boot build" >&2
-        echo "  2. tools/mkimage, rv1106_ddr.bin, or spl/u-boot-spl.bin missing" >&2
-        echo "     (found: $(ls tools/mkimage rv1106_ddr.bin spl/u-boot-spl.bin 2>&1))" >&2
-        echo "  3. No idblock.img under ../../../../project/image/*/" >&2
-        echo "" >&2
-        echo "Build artifacts present:" >&2
-        find . -maxdepth 3 -name "*.bin" -o -name "*.img" 2>/dev/null | head -30 >&2
-        exit 1
-      fi
-      cp "$FOUND" $out/SPL
     fi
+
+    # Strategy 3 — build idbloader from DDR blob + SPL using tools/mkimage -T rksd.
+    # RV1103/RV1106 is the same silicon as RV1126; try chip names from the SDK's
+    # supported list in order.  mkimage exits non-zero on unsupported names.
+    if [ -z "$IDBLOCK" ] && [ -f tools/mkimage ] && [ -f rv1106_ddr.bin ] && [ -f spl/u-boot-spl.bin ]; then
+      echo "Strategy 3: building idbloader with mkimage -T rksd..."
+      for chipname in rv1126 rv1108 rk3308; do
+        echo "  Trying -n $chipname ..."
+        if ./tools/mkimage -n "$chipname" -T rksd \
+            -d ./rv1106_ddr.bin:spl/u-boot-spl.bin \
+            /tmp/idbloader-candidate.img 2>/dev/null; then
+          IDBLOCK="/tmp/idbloader-candidate.img"
+          echo "  Success with -n $chipname"
+          break
+        fi
+      done
+    fi
+
+    if [ -z "$IDBLOCK" ]; then
+      echo "ERROR: Cannot produce an idbloader by any strategy:" >&2
+      echo "  1. No idbloader.img emitted by U-Boot build" >&2
+      echo "  2. No idblock.img under ../../../../project/image/*/" >&2
+      echo "     (dirs present: $(ls ../../../../project/image/ 2>/dev/null | head -5))" >&2
+      echo "  3. mkimage -T rksd failed for all tried chip names (rv1126 rv1108 rk3308)" >&2
+      echo "" >&2
+      echo "Build artifacts present:" >&2
+      find . -maxdepth 3 \( -name "*.bin" -o -name "*.img" \) 2>/dev/null | head -30 >&2
+      exit 1
+    fi
+
+    cp "$IDBLOCK" $out/SPL
 
     # idblock.img is the conventional SDK name for the idbloader.
     # Provide it as an alias so flash scripts can reference either name.
