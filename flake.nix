@@ -278,10 +278,13 @@
         mkdir -p $out
         cp ${picoMiniA-sdimage.config.system.build.sdImage}/sd-flashable.img \
                                                                     $out/sd-flashable.img
-        # USB download loader — for recovery when SD card boot fails.
-        # Use with: rkdeveloptool db download.bin   (board in maskrom mode)
-        # Then:     rkdeveloptool wl 0 sd-flashable.img
-        cp ${luckfoxUboot}/download.bin                            $out/download.bin
+        # Bootloader blobs — useful for patching or inspecting the SD image.
+        cp ${luckfoxUboot}/SPL                                      $out/idblock.img
+        cp ${luckfoxUboot}/u-boot.img                              $out/uboot.img
+        # USB Rockchip miniloader — THE correct binary for `rkdeveloptool db`.
+        # LOADER format (USB protocol); different from idblock.img (SD/SPI format).
+        # Use to enter loader mode from maskrom: rkdeveloptool db rv1106_miniloader.bin
+        cp ${rv1106Miniloader}                                      $out/rv1106_miniloader.bin
         # Write instructions
         cat > $out/FLASH.txt << 'EOF'
 Luckfox Pico Mini A — Flash Instructions
@@ -308,26 +311,38 @@ Verify MBR (partition table at byte 446, signature 55 aa at byte 510):
   sudo dd if=/dev/rdisk4 bs=1 skip=446 count=66 2>/dev/null | xxd
 
 ── Recovery flash via USB (maskrom mode) ────────────────────────────────
-  If the SD card boot fails, flash directly over USB:
+  If the SD card boot fails, you can flash over USB instead.
+  Board must be in maskrom: ID 2207:110c
 
-  1. Hold the BOOT button and plug USB-C cable (or short BOOT pad to GND)
-     Board shows in lsusb as: ID 2207:110c  (Rockchip maskrom)
+  1. Load the Rockchip USB miniloader (LOADER format — NOT idblock.img):
+     rkdeveloptool db rv1106_miniloader.bin
 
-  2. Load the USB download loader into DRAM:
-     rkdeveloptool db download.bin
-
-  3. Write the SD image to the device:
+  2. Write the SD image to the device storage:
      rkdeveloptool wl 0 sd-flashable.img
 
-  4. Reset the board:
+  3. Reset:
      rkdeveloptool rd
 
-  Note: `rkdeveloptool db` expects LOADER format (download.bin), NOT the
-  idbloader format inside sd-flashable.img — these are different formats.
+── Diagnosing SD boot failure ────────────────────────────────────────────
+  If the board goes to maskrom with this image but boots the Ubuntu demo,
+  try patching the Ubuntu bootloaders into this image to isolate where
+  the failure is:
+
+  cp sd-flashable.img sd-test.img
+  dd if=Ubuntu_Luckfox_Pico_Mini_A_MicroSD_*/idblock.img \
+     of=sd-test.img bs=512 seek=64 conv=notrunc
+  dd if=Ubuntu_Luckfox_Pico_Mini_A_MicroSD_*/uboot.img \
+     of=sd-test.img bs=512 seek=16384 conv=notrunc
+
+  Flash sd-test.img with dd, then:
+    LED comes on  → our compiled U-Boot is broken; the idblock.img and
+                    uboot.img in this bundle are the ones being used.
+    Still maskrom → issue is with partition layout, kernel, or initramfs.
 
 ── Serial console ────────────────────────────────────────────────────────
   Connect a 3.3V USB-serial adapter to the UART pads at 115200 baud.
-  U-Boot and kernel boot messages appear here if the SD card is not booting.
+  U-Boot and kernel log appear here — attach one before flashing to see
+  exactly where the boot stops.
 EOF
       '';
 
