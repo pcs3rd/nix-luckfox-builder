@@ -39,9 +39,9 @@ in
   # Prefer pkgs.pkgsStatic.foo — static binaries need no dynamic linker.
   packages = with localPkgs; [
     sysinfo        # lightweight system-info utility (static)
-    htop           # interactive process viewer
-    nano           # text editor
-    meshtastic-cli # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
+    #top           # interactive process viewer
+    #nano           # text editor
+   #meshtastic-cli # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
     # nrfnet is added automatically when services.nrfnet.enable = true
   ];
 
@@ -87,7 +87,7 @@ in
   #          ssh root@luckfox upgrade < result/rootfs.squashfs
   #
   system.abRootfs = {
-    enable      = true;
+    enable      = false;
     swapSize    = 32;   # MiB of disk swap in persist partition — disable with 0
     persistSize = 64;   # MiB for overlayfs upper/work dirs (default 256 is excessive)
   };
@@ -108,7 +108,7 @@ in
   # ── Services ────────────────────────────────────────────────────────────────
 
   services.getty.enable = true;    # serial console on ttyS0
-  services.ssh.enable   = true;    # dropbear SSH; set users.root.hashedPassword first
+  services.ssh.enable   = false;    # dropbear SSH; set users.root.hashedPassword first
 
   # mesh-bbs: minimal Meshtastic BBS + store-and-forward bot.
   # Commands via direct message: bbs list/read/post, snf send/list
