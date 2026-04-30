@@ -51,6 +51,8 @@
   # extends boot time.  Remove quiet to see driver output for debugging.
   boot.cmdline = lib.mkForce "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 init=/sbin/init panic=1 initcall_debug loglevel=8 random.trust_bootloader=on";
 
+  # Disable Luckfox board support — prevents SDK derivation evaluation.
+  luckfox.support   = lib.mkForce false;
   # U-Boot is supplied via -bios, not embedded in the disk image.
   boot.uboot.enable = lib.mkForce false;
   rockchip.enable   = lib.mkForce false;

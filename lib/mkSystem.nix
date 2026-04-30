@@ -9,6 +9,7 @@ lib.evalModules {
   specialArgs = { inherit pkgs lib buildDate; };
 
   modules = lib.toList configuration ++ [
+    ../modules/core/luckfox-board.nix
     ../modules/core/options.nix
     ../modules/core/rootfs.nix
     ../modules/core/services.nix

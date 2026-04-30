@@ -23,7 +23,9 @@
   # Boot from the virtio-blk disk QEMU attaches as /dev/vda (read-only).
   boot.cmdline = lib.mkForce "console=ttyAMA0 root=/dev/vda ro init=/sbin/init panic=1";
 
-  # configuration.nix enables these; force them off for QEMU
+  # Disable Luckfox board support — prevents luckfox-board.nix from forcing
+  # SDK kernel/U-Boot derivation evaluation in QEMU builds.
+  luckfox.support   = lib.mkForce false;
   boot.uboot.enable = lib.mkForce false;
   rockchip.enable   = lib.mkForce false;
 

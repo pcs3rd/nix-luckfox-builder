@@ -16,23 +16,14 @@ let
 in
 
 {
-  imports = [
-    ./hardware/pico-mini-b.nix
-  ];
-
-  # ── Kernel (built from LuckfoxTECH SDK source) ──────────────────────────────
-  # Uncomment these three lines to build the kernel from source.
-  # After the first build, check result/dtbs/ to confirm the DTB filename:
-  #   nix build .#luckfox-kernel && ls result/dtbs/
-  #
-  # NOTE: keep these commented out in this file.  Nix evaluates all module
-  # definitions even for overridden options, so referencing luckfox-kernel
-  # here would force it to build in QEMU contexts too.  Instead, set these
-  # in a hardware-only configuration that QEMU configs do not import.
-  #
-  # device.kernel            = "${localPkgs.luckfox-kernel}/zImage";
-  # device.dtb               = "${localPkgs.luckfox-kernel}/dtbs/rv1103-luckfox-pico-mini-b.dtb";
-  # device.kernelModulesPath = "${localPkgs.luckfox-kernel}/lib/modules";
+  # ── Board selection ─────────────────────────────────────────────────────────
+  # The luckfox-board module (modules/core/luckfox-board.nix) sets the kernel,
+  # DTB, U-Boot paths, hostname, and USB role-switch path automatically.
+  # Change model to "pico-mini-a" for the Mini A (no SPI flash).
+  luckfox = {
+    support = true;
+    model   = "pico-mini-b";   # "pico-mini-a" | "pico-mini-b"
+  };
 
   # ── Extra packages ──────────────────────────────────────────────────────────
   # Binaries from each package's bin/ are copied into /bin on the rootfs.
@@ -96,15 +87,6 @@ in
   #   512 MiB − 2 MiB gap − 64 MiB boot − 64 MiB persist = 382 MiB ÷ 2 = 191 MiB/slot
   # Increase if your rootfs squashfs ever exceeds ~150 MiB.
   system.imageSize = 512;
-  # ── Bootloader ──────────────────────────────────────────────────────────────
-  boot.uboot = {
-    enable  = true;
-    spl     = "${localPkgs.uboot}/SPL";
-    package = "${localPkgs.uboot}/u-boot.img";
-  };
-
-  rockchip.enable = true;
-
   # ── Services ────────────────────────────────────────────────────────────────
 
   services.getty.enable = true;    # serial console on ttyS0
@@ -178,10 +160,9 @@ in
   '';
 
   # ── Networking ──────────────────────────────────────────────────────────────
-  networking = {
-    dhcp.enable = true;
-    hostname    = "luckfox";
-  };
+  # hostname is set automatically by luckfox-board based on the model.
+  # Override here if needed: networking.hostname = "my-device";
+  networking.dhcp.enable = true;
 
   # ── Users ───────────────────────────────────────────────────────────────────
   # Generate a new hash with:  openssl passwd -6 yourpassword
