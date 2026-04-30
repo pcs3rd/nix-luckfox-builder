@@ -39,9 +39,9 @@ in
   # Prefer pkgs.pkgsStatic.foo — static binaries need no dynamic linker.
   packages = with localPkgs; [
     sysinfo        # lightweight system-info utility (static)
-    htop           # interactive process viewer
-    nano           # text editor
-    meshtastic-cli # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
+#    htop           # interactive process viewer
+#    nano           # text editor
+#    meshtastic-cli # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
     # nrfnet is added automatically when services.nrfnet.enable = true
   ];
 
@@ -87,7 +87,7 @@ in
   #          ssh root@luckfox upgrade < result/rootfs.squashfs
   #
   system.abRootfs = {
-    enable      = true;
+    enable      = false;
     swapSize    = 32;   # MiB of disk swap in persist partition — disable with 0
     persistSize = 64;   # MiB for overlayfs upper/work dirs (default 256 is excessive)
   };
