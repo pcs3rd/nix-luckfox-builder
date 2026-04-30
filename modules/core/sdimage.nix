@@ -48,54 +48,63 @@ let
   partStartSector = 4096;
 
   # ── U-Boot boot script (A/B mode) ────────────────────────────────────────
-  # Loaded by U-Boot's distro_bootcmd from partition 1 (the ext4 boot partition).
-  # Loads the kernel and initramfs; the initramfs handles slot detection and
-  # overlay setup — boot.scr no longer needs to read the slot indicator byte.
+  # Written to the ext4 boot partition (p1) as boot.scr (a compiled U-Boot
+  # script image).  U-Boot's distro_bootcmd finds and executes it.
   #
-  # Load addresses are set explicitly for 64 MB DRAM (base 0x40000000):
+  # Load addresses for 64 MB DRAM (base 0x40000000):
   #
   #   0x40200000  kernel_addr_r    (2 MB above base — avoids SPL/U-Boot area)
   #   0x41E00000  fdt_addr_r       (30 MB above base — a few KB, between K+R)
   #   0x42000000  ramdisk_addr_r   (32 MB above base — 32 MB for initramfs)
   #
-  # Without explicit overrides, U-Boot's default ramdisk_addr_r for QEMU ARM
-  # is 0x44000000 — exactly at the 64 MB boundary — which causes QEMU's
-  # virtio-blk DMA to fault ("bogus descriptor or out of resources").
+  # Robustness: we try two load strategies so the script works with any
+  # Rockchip U-Boot (ours or the Ubuntu demo's), regardless of whether
+  # distro_bootcmd sets devtype/devnum/distro_bootpart:
   #
-  # Uses distro_bootcmd environment variables for device portability:
-  #   ''${devtype}         — "mmc" (real hardware) or "virtio" (QEMU)
-  #   ''${devnum}          — device index (0 for the first device)
-  #   ''${distro_bootpart} — partition where boot.scr was found (1)
-  #   ''${filesize}        — updated by each ext4load; pass after last load
+  #   Strategy A — distro_bootcmd variables (set when called via script bootmeth)
+  #   Strategy B — hardcoded mmc 0:1 (SD card, partition 1; always correct on Mini A)
+  #
+  # The 'if' command tests whether devtype is already set.  If not, we fall
+  # through to the hardcoded mmc 0:1 path.  Either way, the same files are
+  # loaded at the same addresses and bootz is called identically.
   abBootScript = pkgs.writeText "ab-boot-script.txt" ''
-    echo "A/B squashfs boot: loading kernel + initramfs from partition 1"
+    echo "=== nix-luckfox A/B boot ==="
     setenv kernel_addr_r  0x40200000
     setenv fdt_addr_r     0x41E00000
     setenv ramdisk_addr_r 0x42000000
     setenv bootargs "${config.boot.cmdline}"
-    ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r} /zImage
-    ${lib.optionalString (config.device.dtb != null) ''
-      ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r} /${config.device.name}.dtb
-    ''}ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
-    echo "bootargs: ''${bootargs}"
+
     ${if config.device.dtb != null then ''
+      # Strategy A: distro_bootcmd variables (script bootmeth path)
+      if test -n "''${devtype}"; then
+        echo "Loading via distro vars: ''${devtype} ''${devnum}:''${distro_bootpart}"
+        ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r}  /zImage
+        ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r}     /${config.device.name}.dtb
+        ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
+      else
+        # Strategy B: hardcoded mmc 0:1 (SD card always slot 0, boot part always p1)
+        echo "Loading via mmc 0:1 (no distro vars set)"
+        ext4load mmc 0:1 ''${kernel_addr_r}  /zImage
+        ext4load mmc 0:1 ''${fdt_addr_r}     /${config.device.name}.dtb
+        ext4load mmc 0:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
+      fi
+      echo "bootargs: ''${bootargs}"
       bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
     '' else ''
-      # No board DTB in the boot partition (e.g. QEMU).  Use the FDT that
-      # the prior boot stage (QEMU) passed to U-Boot (''${fdtcontroladdr}).
-      #
-      # Problem: fdtcontroladdr is inside U-Boot's own relocated image region,
-      # which the LMB allocator already owns.  bootz calls boot_relocate_fdt()
-      # to reserve the FDT's memory, which fails ("Failed to reserve memory")
-      # because that address is already allocated.
-      #
-      # Fix: copy the control FDT to fdt_addr_r (0x41E00000) — free RAM between
-      # the kernel and the initramfs.  QEMU allocates exactly 1 MB (0x100000)
-      # for the virt machine FDT regardless of actual content size; fdt move
-      # checks the FDT header's declared total size against the length arg and
-      # aborts if len < fdt_totalsize.  0x100000 satisfies QEMU's declared size;
-      # fdt_addr_r + 0x100000 = 0x41F00000 is 1 MB below the initramfs at
-      # ramdisk_addr_r = 0x42000000, so there is no overlap.
+      # QEMU path (no board DTB): use the FDT passed by QEMU to U-Boot.
+      # Copy it to fdt_addr_r first — fdtcontroladdr is inside U-Boot's
+      # relocated region which the LMB allocator already owns, and bootz
+      # would fail trying to reserve it a second time.
+      if test -n "''${devtype}"; then
+        echo "Loading via distro vars: ''${devtype} ''${devnum}:''${distro_bootpart}"
+        ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r}  /zImage
+        ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
+      else
+        echo "Loading via mmc 0:1"
+        ext4load mmc 0:1 ''${kernel_addr_r}  /zImage
+        ext4load mmc 0:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
+      fi
+      echo "bootargs: ''${bootargs}"
       fdt move ''${fdtcontroladdr} ''${fdt_addr_r} 0x100000
       bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
     ''}
