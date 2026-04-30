@@ -228,6 +228,7 @@ pkgs.stdenv.mkDerivation {
     # If the source is present we add them to arch/arm/boot/dts/Makefile so
     # they're compiled alongside the rest of the DTBs.
     for dts in \
+        arch/arm/boot/dts/rv1103-luckfox-pico-mini-a.dts \
         arch/arm/boot/dts/rv1103-luckfox-pico-mini-b.dts \
         arch/arm/boot/dts/rv1103-luckfox-pico.dts \
         arch/arm/boot/dts/rv1106-luckfox-pico-mini-b.dts \

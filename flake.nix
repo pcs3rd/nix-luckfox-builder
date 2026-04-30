@@ -182,6 +182,9 @@
       # The partition layout is determined entirely inside configurations/sdimage.nix
       # and modules/core/sdimage.nix — no separate -ab configuration needed.
       picoMiniB-sdimage = mkSystem   { configuration = ./configurations/sdimage.nix;    };
+      # Luckfox Pico Mini A — same RV1103 silicon as Mini B, no SPI NOR flash.
+      # Boot ROM goes directly to SD card (no SPI to try first).
+      picoMiniA-sdimage = mkSystem   { configuration = ./configurations/pico-mini-a-sdimage.nix; };
 
       # ── Rockchip USB download miniloader ───────────────────────────────────────
       #
@@ -248,6 +251,47 @@
         cp ${spiImage}/spi.img                                      $out/spi.img
         cp ${picoMiniB-sdimage.config.system.build.sdImage}/sd-flashable.img \
                                                                     $out/sd-flashable.img
+      '';
+
+      # ── Pico Mini A flash bundle ────────────────────────────────────────────────
+      #
+      # The Mini A has NO onboard SPI NOR flash, so this bundle only contains
+      # the SD card image.  Write it directly with dd (no SPI flashing needed):
+      #
+      #   nix build .#pico-mini-a-flash-bundle
+      #   diskutil list                          # find SD card, e.g. disk4
+      #   diskutil unmountDisk /dev/disk4
+      #   sudo dd if=result/sd-flashable.img of=/dev/rdisk4 bs=4m status=progress
+      #
+      # Note: use rdiskN (raw device) on macOS for reliable sector-accurate writes.
+      flashBundleMiniA = hostPkgs.runCommand "luckfox-pico-mini-a-flash-bundle" {} ''
+        mkdir -p $out
+        cp ${picoMiniA-sdimage.config.system.build.sdImage}/sd-flashable.img \
+                                                                    $out/sd-flashable.img
+        # Write instructions
+        cat > $out/FLASH.txt << 'EOF'
+Luckfox Pico Mini A — Flash Instructions
+==========================================
+
+The Mini A has NO SPI flash. Just write the SD card image directly.
+
+macOS:
+  diskutil list                            # find SD card (e.g. /dev/disk4)
+  diskutil unmountDisk /dev/disk4
+  sudo dd if=sd-flashable.img of=/dev/rdisk4 bs=4m status=progress
+
+Linux:
+  lsblk                                   # find SD card (e.g. /dev/sdb)
+  sudo dd if=sd-flashable.img of=/dev/sdb bs=4M status=progress
+
+Verify the write (sector 64 = SPL, should have Rockchip loader magic):
+  sudo dd if=/dev/rdisk4 bs=512 skip=64 count=1 2>/dev/null | xxd | head -2
+
+Verify MBR (partition table at byte 446, signature 55 aa at byte 510):
+  sudo dd if=/dev/rdisk4 bs=1 skip=446 count=66 2>/dev/null | xxd
+
+Serial console (115200 baud) on UART pads shows U-Boot + kernel output.
+EOF
       '';
 
       # ── QEMU test disk (read-only ext4 image of the rootfs) ─────────────────
@@ -662,6 +706,16 @@ RUNEOF
         #   sd-flashable.img      — full SD card image for `dd`
         #   SPL                   — U-Boot idbloader (embedded in the above; for reference)
         flash-bundle = flashBundle;
+
+        # ── Pico Mini A outputs ─────────────────────────────────────────────────
+        # Same RV1103 silicon as Mini B; no SPI flash.
+        # Write sd-flashable.img directly — no SPI step needed.
+        #
+        #   nix build .#pico-mini-a-sdImage-flashable
+        #   nix build .#pico-mini-a-flash-bundle
+        "pico-mini-a-sdImage-flashable" = picoMiniA-sdimage.config.system.build.sdImage;
+        "pico-mini-a-flash-bundle"      = flashBundleMiniA;
+
         # Kernel built from SDK source (zImage + DTBs + modules).
         # Inspect result/dtbs/ to find the correct DTB name for hardware/pico-mini-b.nix.
         luckfox-kernel    = import ./pkgs/luckfox-kernel.nix { inherit pkgs; };
