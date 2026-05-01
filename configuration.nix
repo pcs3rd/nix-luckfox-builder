@@ -81,8 +81,8 @@ in
   #
   system.abRootfs = {
     enable      = true;
-    slotSize     = 128;   # 128 MiB per slot, explicit
-    swapSize    = 32;   # MiB of disk swap in persist partition — disable with 0
+    slotSize     = 64;   # 128 MiB per slot, explicit
+    swapSize    = 16;   # MiB of disk swap in persist partition — disable with 0
     persistSize = 64;   # MiB for overlayfs upper/work dirs (default 256 is excessive)
   };
 
