@@ -211,6 +211,11 @@
         sha256 = "0rdwqhdz4sw339a5c8c3mv6ahkhivxdjixzf8w08gnaya33kghgx";
       };
 
+      # Board-specific idbloader committed to the repo.
+      # DDR timing is calibrated for the RV1103 DRAM on Luckfox Pico Mini A/B.
+      # Source: extracted from the Ubuntu Luckfox Pico Mini A demo image (verified working).
+      rv1103Idblock = ./hardware/rv1103/idblock.img;
+
       # ── SPI NOR image ──────────────────────────────────────────────────────────
       #
       # 8 MiB blank image with the SPL written at offset 0x8000 (the Rockchip
@@ -223,10 +228,10 @@
           dd if=/dev/zero of=$out/spi.img bs=1M count=8 2>/dev/null
           # idbloader (SPL) at byte offset 0x8000 (sector 64 × 512 B).
           # The SPI NOR boot ROM reads the idbloader from this same offset.
-          dd if=${luckfoxUboot}/SPL of=$out/spi.img \
+          dd if=${rv1103Idblock} of=$out/spi.img \
             bs=1 seek=$((0x8000)) conv=notrunc 2>/dev/null
           echo "SPI image: $(du -sh $out/spi.img | cut -f1)"
-          echo "SPL size:  $(du -sh ${luckfoxUboot}/SPL | cut -f1)"
+          echo "SPL size:  $(du -sh ${rv1103Idblock} | cut -f1)"
         '';
 
       # ── Flash bundle ────────────────────────────────────────────────────────────
@@ -251,7 +256,7 @@
       #   sudo dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
       flashBundle = hostPkgs.runCommand "luckfox-flash-bundle" {} ''
         mkdir -p $out
-        cp ${luckfoxUboot}/SPL                                      $out/SPL
+        cp ${rv1103Idblock}                                         $out/SPL
         cp ${luckfoxUboot}/u-boot.img                              $out/u-boot.img
         # USB download loaders — either works with `rkdeveloptool db`:
         #   download.bin          — from the SDK's project/image/ (same as Ubuntu demo)
@@ -279,7 +284,7 @@
         cp ${picoMiniA-sdimage.config.system.build.sdImage}/sd-flashable.img \
                                                                     $out/sd-flashable.img
         # Bootloader blobs — useful for patching or inspecting the SD image.
-        cp ${luckfoxUboot}/SPL                                      $out/idblock.img
+        cp ${rv1103Idblock}                                         $out/idblock.img
         cp ${luckfoxUboot}/u-boot.img                              $out/uboot.img
         # USB Rockchip miniloader — THE correct binary for `rkdeveloptool db`.
         # LOADER format (USB protocol); different from idblock.img (SD/SPI format).

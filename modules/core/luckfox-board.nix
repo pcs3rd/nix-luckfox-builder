@@ -85,7 +85,16 @@ in
         rockchip.enable   = lib.mkDefault true;
         boot.uboot.enable = lib.mkDefault true;
         boot.uboot = {
-          spl     = lib.mkDefault "${localPkgs.uboot}/SPL";
+          # idblock.img is the Rockchip idbloader: DDR init blob + SPL packed
+          # together.  It is written at sector 64 of the SD card (and offset
+          # 0x8000 of SPI NOR on Mini B).  This binary is board-specific — the
+          # DDR timing parameters must match the exact DRAM chip on the board.
+          #
+          # We commit the verified-working binary from the Ubuntu Luckfox Mini A
+          # demo image rather than building it from source, because the SDK's
+          # project/image/ pre-builts vary by board and the mkimage -T rksd
+          # approach has chip-name limitations in U-Boot 2017.09.
+          spl     = lib.mkDefault ../../hardware/rv1103/idblock.img;
           package = lib.mkDefault "${localPkgs.uboot}/u-boot.img";
         };
 
