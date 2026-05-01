@@ -275,7 +275,7 @@ PYEOF
     # Wrap in a legacy mkimage ramdisk header so U-Boot's bootz explicitly
     # recognises the image, extracts address+size from the header, and writes
     # linux,initrd-start / linux,initrd-end into the FDT correctly.
-    # Without the header, bootz relies on the addr:${filesize} raw-cpio path
+    # Without the header, bootz relies on the addr:''${filesize} raw-cpio path
     # which silently fails on the Luckfox SDK U-Boot 2017.09.
     # initrd.img = 8.3-compatible filename (safe without LFN support in U-Boot).
     mkimage -A arm -O linux -T ramdisk -C gzip -a 0x02000000 -e 0x02000000 \
