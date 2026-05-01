@@ -170,6 +170,23 @@ pkgs.stdenv.mkDerivation {
     # the "Hit key to stop autoboot" prompt).  Set to 0 for production.
     set_config_str CONFIG_BOOTDELAY 2
 
+    # ── Patch C board config headers ─────────────────────────────────────────
+    # U-Boot 2017.09 has incomplete Kconfig migration: many Rockchip boards
+    # still #define CONFIG_BOOTCOMMAND and CONFIG_BOOTDELAY in include/configs/
+    # C headers.  A C-header #define wins over a .config Kconfig value, so
+    # the Kconfig changes above would have no effect if headers also define them.
+    # Find and patch any such definitions to ensure our values take effect.
+    for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY" include/configs/ 2>/dev/null); do
+      if grep -q '#define CONFIG_BOOTCOMMAND' "$header"; then
+        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "run distro_bootcmd"|' "$header"
+        echo "  patched CONFIG_BOOTCOMMAND in $header"
+      fi
+      if grep -q '#define CONFIG_BOOTDELAY' "$header"; then
+        sed -i 's|#define CONFIG_BOOTDELAY .*|#define CONFIG_BOOTDELAY 2|' "$header"
+        echo "  patched CONFIG_BOOTDELAY in $header"
+      fi
+    done
+
     # Recalculate Kconfig dependencies after the above changes.
     make \
       ARCH=arm \
