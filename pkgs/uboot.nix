@@ -170,6 +170,18 @@ pkgs.stdenv.mkDerivation {
     # 'source' executes a mkimage-wrapped script; enable it explicitly.
     enable_config CONFIG_CMD_SOURCE
 
+    # ── MMC multi-block read workaround ───────────────────────────────────────
+    # On this board the MMC driver's multi-block path (CMD18) fails with
+    # "Re-init mmc_read_blocks error" when called from the command-line fatload
+    # code path.  Single-block reads (CMD17) succeed (FAT directory / metadata
+    # reads work; only file data transfers fail).  Force single-block I/O by
+    # setting the maximum transfer size to one block (512 B).
+    # This is slower but correct; file loads will work even if large reads fail.
+    disable_config CONFIG_MMC_IO_VOLTAGE
+    disable_config CONFIG_MMC_UHS_SUPPORT
+    disable_config CONFIG_MMC_HS400_SUPPORT
+    disable_config CONFIG_MMC_HS200_SUPPORT
+
     # Use Python to write BOOTCOMMAND to .config — the value contains embedded
     # double quotes which break sed when used inside a double-quoted expression.
     python3 - << 'PYEOF'
