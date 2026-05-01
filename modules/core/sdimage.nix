@@ -146,7 +146,20 @@ in
     BOOT_SIZE_SECTORS=$(( ${toString abCfg.bootPartSize} * 2048 ))
     PERSIST_SIZE_SECTORS=$(( ${toString abCfg.persistSize} * 2048 ))
     AVAILABLE_SECTORS=$(( TOTAL_SECTORS - SECTOR ))
+    ${if abCfg.slotSize != 0 then ''
+    # Explicit slot size from system.abRootfs.slotSize.
+    SLOT_SIZE_SECTORS=$(( ${toString abCfg.slotSize} * 2048 ))
+    REQUIRED_SECTORS=$(( BOOT_SIZE_SECTORS + 2 * SLOT_SIZE_SECTORS + PERSIST_SIZE_SECTORS ))
+    if [ "$REQUIRED_SECTORS" -gt "$AVAILABLE_SECTORS" ]; then
+      echo "ERROR: explicit slot layout requires $((REQUIRED_SECTORS / 2048)) MiB but" >&2
+      echo "  only $(( AVAILABLE_SECTORS / 2048 )) MiB available (system.imageSize = ${toString config.system.imageSize} MiB)." >&2
+      echo "  Needed: bootPartSize(${toString abCfg.bootPartSize}) + 2×slotSize(${toString abCfg.slotSize}) + persistSize(${toString abCfg.persistSize}) = $((REQUIRED_SECTORS / 2048)) MiB" >&2
+      exit 1
+    fi
+    '' else ''
+    # Auto slot size: divide remaining space equally between the two slots.
     SLOT_SIZE_SECTORS=$(( (AVAILABLE_SECTORS - BOOT_SIZE_SECTORS - PERSIST_SIZE_SECTORS) / 2 ))
+    ''}
 
     BOOT_START=$SECTOR
     SLOT_A_START=$(( BOOT_START  + BOOT_SIZE_SECTORS   ))

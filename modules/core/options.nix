@@ -581,6 +581,25 @@ with lib;
         '';
       };
 
+      slotSize = mkOption {
+        type        = types.int;
+        default     = 0;
+        description = ''
+          Size of each A/B rootfs slot partition (p2 and p3) in MiB.
+
+          0 (default) — auto: divide the remaining disk space equally between
+          the two slots after the boot and persist partitions are allocated.
+          Use this when you want the slots to fill whatever system.imageSize
+          provides.
+
+          Non-zero — explicit: each slot is exactly this many MiB.  Useful
+          when you want predictable slot sizes independent of the total image
+          size, or when you are targeting a specific SD card capacity.
+          system.imageSize must be large enough to hold:
+            bootPartSize + 2 × slotSize + persistSize + 2 MiB overhead.
+        '';
+      };
+
       persistSize = mkOption {
         type        = types.int;
         default     = 256;
