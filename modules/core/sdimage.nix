@@ -141,6 +141,7 @@ in
       e2fsprogs   # mkfs.ext4 — persist partition (p4) and non-A/B rootfs
       python3     # MBR partition-table writer
       ubootTools  # mkimage — compiles the A/B boot script
+      dtc         # fdtput  — patch DTB properties at image-build time
     ] ++ lib.optionals abCfg.enable [
       squashfsTools  # mksquashfs for slot images (via rootfsPartition)
       dosfstools     # mkfs.vfat — boot partition (p1)
@@ -269,6 +270,18 @@ PYEOF
     ''}
     ${lib.optionalString (config.device.dtb != null) ''
       cp ${config.device.dtb} boot-staging/${config.device.name}.dtb
+
+      # ── DTB post-processing ──────────────────────────────────────────────────
+      # Disable hardware nodes that are not wired up on Mini A/B boards.
+      # fdtput modifies the binary DTB in-place; '|| true' is a no-op guard
+      # in case a future kernel DTB omits these nodes entirely.
+      #
+      # ffa80000.ethernet (GMAC): the SoC has a GMAC peripheral but Mini A/B
+      # boards do not break it out to any connector — disabling it silences
+      # kernel probe failures and avoids spurious network-device registration.
+      fdtput -t s boot-staging/${config.device.name}.dtb \
+        /ethernet@ffa80000 status disabled 2>/dev/null || true
+      echo "DTB: disabled /ethernet@ffa80000 (not wired on Mini A/B)"
     ''}
 
     # Slot-select initramfs handles squashfs mount + overlay setup.

@@ -291,6 +291,24 @@ PYEOF
     # the U-Boot prompt.
     enable_config CONFIG_CMD_SOURCE
 
+    # ── FDT manipulation and arithmetic ──────────────────────────────────────
+    # CONFIG_CMD_FDT enables 'fdt addr' and 'fdt chosen'.
+    # We use 'fdt addr 0x1E00000' to point U-Boot at the loaded DTB, then
+    # 'fdt chosen <start> <end>' to write linux,initrd-start and
+    # linux,initrd-end directly into the FDT's /chosen node.
+    #
+    # This bypasses the Rockchip SDK U-Boot 2017.09 "Fdt Ramdisk skip
+    # relocation" patch, which prevents bootz from ever calling fdt_initrd().
+    # With 'fdt chosen' the properties are in the FDT before bootz runs;
+    # bootz is called with '-' (no ramdisk arg) so it never overwrites them.
+    #
+    # CONFIG_CMD_SETEXPR enables 'setexpr re <a> + <b>' — used to compute
+    # the end address of the ramdisk (0x2000000 + filesize, where filesize
+    # is in hex and is set by the preceding fatload command).
+    enable_config CONFIG_CMD_FDT
+    enable_config CONFIG_OF_LIBFDT
+    enable_config CONFIG_CMD_SETEXPR
+
     # ── MMC multi-block read workaround ───────────────────────────────────────
     # On this board the MMC driver's multi-block path (CMD18) fails with
     # "Re-init mmc_read_blocks error" when called from the command-line fatload
@@ -306,21 +324,31 @@ PYEOF
     # Use Python to write BOOTCOMMAND and BOOTARGS to .config.  Both values
     # contain embedded double quotes which break sed inside double-quoted shell
     # expressions.  BOOTCOMMAND explanation:
-    #   mmc dev 1      — sets curr_device=1 so 'mmc rescan' targets the SD card.
-    #   mmc rescan     — clears has_init, calls mmc_init() to recalibrate the
-    #                    MMC clock divider after U-Boot relocation.
-    #   fatload x3     — loads zImage, board.dtb, and the slot-select initramfs
-    #                    from the FAT boot partition into DRAM-safe addresses.
-    #                    initrd.img is a legacy mkimage ramdisk image (8.3 name)
-    #                    so bootz parses the 64-byte header and writes correct
-    #                    linux,initrd-start/end into the FDT.  Raw cpio.gz with
-    #                    addr:''${filesize} silently failed on this SDK's bootz.
-    #   bootz ...      — starts the kernel.  ramdisk addr is the legacy image
-    #                    address; bootz reads size from the mkimage header,
-    #                    no :''${filesize} needed.
+    #   mmc dev 1          — sets curr_device=1 so 'mmc rescan' targets the SD.
+    #   mmc rescan         — clears has_init, calls mmc_init() to recalibrate
+    #                        the MMC clock divider after U-Boot relocation.
+    #   fatload x2         — loads zImage and board.dtb into DRAM-safe addresses.
+    #   fdt addr 0x1E00000 — points the FDT subsystem at the loaded DTB so that
+    #                        subsequent 'fdt chosen' writes go to the right blob.
+    #   fatload initrd.img — loads the legacy mkimage ramdisk (8.3 filename).
+    #                        After fatload, ''${filesize} = size of initrd.img in
+    #                        hex (set by U-Boot fatload automatically).
+    #   setexpr re ...     — computes initrd end: 0x2000000 + ''${filesize}.
+    #                        setexpr stores the result as a hex string in 're'.
+    #   fdt chosen ...     — writes linux,initrd-start=0x2000040 (data start,
+    #                        skipping the 64-byte mkimage header) and
+    #                        linux,initrd-end=''${re} directly into /chosen.
+    #                        This bypasses the Rockchip SDK U-Boot 2017.09
+    #                        "Fdt Ramdisk skip relocation" patch which prevents
+    #                        bootz from ever calling fdt_initrd() itself.
+    #   bootz 0x800000 - 0x1E00000
+    #                      — '-' means no ramdisk via bootz; initrd info is
+    #                        already in the FDT from 'fdt chosen' above.
+    #                        fdt_initrd(fdt,0,0) called by bootz returns early
+    #                        without clearing our /chosen properties.
     python3 - << 'PYEOF'
 import re, sys
-bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x00800000 zImage; fatload mmc 1:1 0x01E00000 board.dtb; fatload mmc 1:1 0x02000000 initrd.img; bootz 0x00800000 0x02000000 0x01E00000"'
+bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x800000 zImage; fatload mmc 1:1 0x1E00000 board.dtb; fdt addr 0x1E00000; fatload mmc 1:1 0x2000000 initrd.img; setexpr re 0x2000000 + 0x${filesize}; fdt chosen 0x2000040 ${re}; bootz 0x800000 - 0x1E00000"'
 bootargs = 'CONFIG_BOOTARGS="${cmdline}"'
 with open('.config') as f:
     content = f.read()
@@ -347,7 +375,7 @@ PYEOF
     # Find and patch any such definitions to ensure our values take effect.
     for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY\|CONFIG_BOOTARGS" include/configs/ 2>/dev/null); do
       if grep -q '#define CONFIG_BOOTCOMMAND' "$header"; then
-        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x00800000 zImage; fatload mmc 1:1 0x01E00000 board.dtb; fatload mmc 1:1 0x02000000 initrd.img; bootz 0x00800000 0x02000000 0x01E00000"|' "$header"
+        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x800000 zImage; fatload mmc 1:1 0x1E00000 board.dtb; fdt addr 0x1E00000; fatload mmc 1:1 0x2000000 initrd.img; setexpr re 0x2000000 + 0x''${filesize}; fdt chosen 0x2000040 ''${re}; bootz 0x800000 - 0x1E00000"|' "$header"
         echo "  patched CONFIG_BOOTCOMMAND in $header"
       fi
       if grep -q '#define CONFIG_BOOTDELAY' "$header"; then
