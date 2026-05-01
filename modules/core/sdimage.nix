@@ -95,17 +95,17 @@ let
       # Strategy A: distro_bootcmd variables (script bootmeth path)
       if test -n "''${devtype}"; then
         echo "Loading via distro vars: ''${devtype} ''${devnum}:''${distro_bootpart}"
-        ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r}  /zImage
-        ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r}     /${config.device.name}.dtb
-        ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
+        load ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r}  /zImage
+        load ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r}     /${config.device.name}.dtb
+        load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
       else
         # Strategy B: hardcoded mmc 1:1
         # On RV1103/Luckfox Mini A: mmc@ffa90000 = slot 0 (empty internal),
         # mmc@ffaa0000 = slot 1 (SD card).  The SD card is ALWAYS mmc 1.
         echo "Loading via mmc 1:1 (no distro vars set)"
-        ext4load mmc 1:1 ''${kernel_addr_r}  /zImage
-        ext4load mmc 1:1 ''${fdt_addr_r}     /${config.device.name}.dtb
-        ext4load mmc 1:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
+        load mmc 1:1 ''${kernel_addr_r}  /zImage
+        load mmc 1:1 ''${fdt_addr_r}     /${config.device.name}.dtb
+        load mmc 1:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
       fi
       echo "bootargs: ''${bootargs}"
       bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
@@ -120,8 +120,8 @@ let
         ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
       else
         echo "Loading via mmc 1:1"
-        ext4load mmc 1:1 ''${kernel_addr_r}  /zImage
-        ext4load mmc 1:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
+        load mmc 1:1 ''${kernel_addr_r}  /zImage
+        load mmc 1:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
       fi
       echo "bootargs: ''${bootargs}"
       fdt move ''${fdtcontroladdr} ''${fdt_addr_r} 0x100000
@@ -133,11 +133,13 @@ in
 {
   config.system.build.sdImage = pkgs.runCommand "sd-flashable" {
     nativeBuildInputs = with pkgs.buildPackages; [
-      e2fsprogs   # mkfs.ext4 with -d flag
+      e2fsprogs   # mkfs.ext4 — persist partition (p4) and non-A/B rootfs
       python3     # MBR partition-table writer
       ubootTools  # mkimage — compiles the A/B boot script
     ] ++ lib.optionals abCfg.enable [
       squashfsTools  # mksquashfs for slot images (via rootfsPartition)
+      dosfstools     # mkfs.vfat — boot partition (p1)
+      mtools         # mcopy   — populate FAT boot partition without mounting
     ];
   } ''
     mkdir -p $out
@@ -221,8 +223,8 @@ def part_entry(start, size, ptype=0x83):
     )
 
 mbr = (b'\x00' * 446
-       + part_entry(boot_start,   boot_size)    # p1: ext4 boot
-       + part_entry(slot_a_start, slot_size)    # p2: squashfs slot A
+       + part_entry(boot_start,   boot_size, 0x0b)  # p1: FAT32 boot (type 0x0b)
+       + part_entry(slot_a_start, slot_size)         # p2: squashfs slot A
        + part_entry(slot_b_start, slot_size)    # p3: squashfs slot B
        + part_entry(persist_start, persist_size) # p4: ext4 persist
        + b'\x55\xAA')
@@ -265,16 +267,29 @@ PYEOF
     mkimage -A arm -O linux -T script -C none -a 0 -e 0 \
       -n "A/B squashfs boot" -d ${abBootScript} boot-staging/boot.scr
 
+    # ── Boot partition (p1): FAT32 ───────────────────────────────────────────
+    # FAT is used instead of ext4 because the Rockchip SDK U-Boot 2017.09 does
+    # not compile in ext4load/ext4fs support, but does include fatload and the
+    # generic 'load' command (which auto-detects FAT).  FAT is also more widely
+    # supported across U-Boot versions and allows manual testing with any U-Boot.
     BOOT_SIZE_BYTES=$(( BOOT_SIZE_SECTORS * 512 ))
     truncate -s $BOOT_SIZE_BYTES boot.img
-    mkfs.ext4 \
-      -d boot-staging \
-      -L ${abCfg.bootPartLabel} \
-      -E lazy_itable_init=0,lazy_journal_init=0 \
-      boot.img
+    mkfs.vfat -F 32 -n BOOT boot.img
+
+    # Populate the FAT image with mtools (no mount required, sandbox-safe).
+    # MTOOLS_SKIP_CHECK=1 suppresses geometry warnings for non-standard sizes.
+    export MTOOLS_SKIP_CHECK=1
+    ${lib.optionalString (config.device.kernel != null) ''
+      mcopy -i boot.img boot-staging/zImage ::zImage
+    ''}
+    ${lib.optionalString (config.device.dtb != null) ''
+      mcopy -i boot.img boot-staging/${config.device.name}.dtb ::${config.device.name}.dtb
+    ''}
+    mcopy -i boot.img boot-staging/initramfs-slotselect.cpio.gz ::initramfs-slotselect.cpio.gz
+    mcopy -i boot.img boot-staging/boot.scr ::boot.scr
 
     dd if=boot.img of=$out/sd-flashable.img bs=512 seek=$BOOT_START conv=notrunc 2>/dev/null
-    echo "boot partition written ($(du -sh boot.img | cut -f1))"
+    echo "boot partition written — FAT32 ($(du -sh boot.img | cut -f1))"
 
     # ── Write squashfs slot A (p2) and slot B (p3) ───────────────────────────
     # The squashfs image is written directly to the raw partition.

@@ -155,16 +155,31 @@ pkgs.stdenv.mkDerivation {
       fi
     }
 
-    enable_config CONFIG_DISTRO_DEFAULTS
-    # Restrict the distro_bootcmd scan to MMC only (no USB/PXE/DHCP delays).
-    set_config_str CONFIG_DISTRO_BOOT_TARGETS '"mmc"'
-
-    # The Rockchip defconfig hardcodes CONFIG_BOOTCOMMAND="run rkboot" which
-    # invokes the proprietary FIT/Android boot sequence.  CONFIG_DISTRO_DEFAULTS
-    # wants to set BOOTCOMMAND="run distro_bootcmd" but loses to the existing
-    # value when olddefconfig runs.  Override it explicitly here so that after
-    # olddefconfig our value is preserved.
-    set_config_str CONFIG_BOOTCOMMAND '"run distro_bootcmd"'
+    # CONFIG_DISTRO_DEFAULTS is not a recognized Kconfig symbol in this SDK's
+    # U-Boot 2017.09 — it gets silently stripped by olddefconfig, so
+    # distro_bootcmd is never defined.  Instead, set BOOTCOMMAND to directly
+    # load and execute boot.scr from the FAT boot partition (mmc 1:1).
+    # The generic 'load' command (CONFIG_CMD_FS_GENERIC) auto-detects FAT and
+    # is compiled into this SDK's U-Boot; no ext4load or distro_bootcmd needed.
+    #
+    # 0x43000000 = 64 MiB above DRAM base: safe staging area for the script
+    # (kernel/dtb/initramfs use 0x40200000–0x42xxxxxx, so no overlap).
+    #
+    # Use Python to write BOOTCOMMAND to .config — the value contains embedded
+    # double quotes which break sed when used inside a double-quoted expression.
+    python3 - << 'PYEOF'
+import re, sys
+bootcmd = r'CONFIG_BOOTCOMMAND="load mmc 1:1 0x43000000 boot.scr; source 0x43000000"'
+with open('.config') as f:
+    content = f.read()
+if re.search(r'^CONFIG_BOOTCOMMAND=', content, re.MULTILINE):
+    content = re.sub(r'^CONFIG_BOOTCOMMAND=.*', bootcmd, content, flags=re.MULTILINE)
+else:
+    content += bootcmd + '\n'
+with open('.config', 'w') as f:
+    f.write(content)
+print('  set ' + bootcmd)
+PYEOF
 
     # Boot delay: 2 seconds — enough time to interrupt over serial (any key at
     # the "Hit key to stop autoboot" prompt).  Set to 0 for production.
@@ -178,7 +193,7 @@ pkgs.stdenv.mkDerivation {
     # Find and patch any such definitions to ensure our values take effect.
     for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY" include/configs/ 2>/dev/null); do
       if grep -q '#define CONFIG_BOOTCOMMAND' "$header"; then
-        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "run distro_bootcmd"|' "$header"
+        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "load mmc 1:1 0x43000000 boot.scr; source 0x43000000"|' "$header"
         echo "  patched CONFIG_BOOTCOMMAND in $header"
       fi
       if grep -q '#define CONFIG_BOOTDELAY' "$header"; then
