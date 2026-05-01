@@ -88,8 +88,9 @@ in
 
   # Total SD image size in MiB.  Slots get whatever's left after boot + persist:
   #   512 MiB − 2 MiB gap − 64 MiB boot − 64 MiB persist = 382 MiB ÷ 2 = 191 MiB/slot
-  # Increase if your rootfs squashfs ever exceeds ~150 MiB.
-  system.imageSize = 512;
+  # Increase if your rootfs squashfs ever exceeds ~150 MiB. 
+  # If this is set to 0, auto-calculate from system.abRootfs.
+  system.imageSize = 0;
   # ── Services ────────────────────────────────────────────────────────────────
 
   services.getty.enable = true;    # serial console on ttyS0
