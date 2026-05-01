@@ -276,7 +276,8 @@ PYEOF
     #   0x02000000 — ramdisk_addr_r   (32 MB mark — initramfs)
     #
     # Load order matters: the last fatload sets 'filesize'.  Load the initramfs
-    # last so ''${filesize} in the bootz ramdisk spec is the initramfs byte count.
+    # last so the fatload sets filesize to the initramfs size (not needed now that
+    # we use a legacy mkimage ramdisk; kept in case of fallback testing).
     #
     # board.dtb is the fixed filename in the FAT boot partition.  sdimage.nix
     # copies the board-specific DTB to this name so BOOTCOMMAND can reference
@@ -313,10 +314,10 @@ PYEOF
     #                    initrd.img is a legacy mkimage ramdisk image (8.3 name)
     #                    so bootz parses the 64-byte header and writes correct
     #                    linux,initrd-start/end into the FDT.  Raw cpio.gz with
-    #                    addr:${filesize} silently failed on this SDK's bootz.
+    #                    addr:''${filesize} silently failed on this SDK's bootz.
     #   bootz ...      — starts the kernel.  ramdisk addr is the legacy image
     #                    address; bootz reads size from the mkimage header,
-    #                    no :${filesize} needed.
+    #                    no :''${filesize} needed.
     python3 - << 'PYEOF'
 import re, sys
 bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x00800000 zImage; fatload mmc 1:1 0x01E00000 board.dtb; fatload mmc 1:1 0x02000000 initrd.img; bootz 0x00800000 0x02000000 0x01E00000"'
