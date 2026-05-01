@@ -67,35 +67,112 @@ pkgs.stdenv.mkDerivation {
     patchelf    # needed to fix the ELF interpreter on rkbin proprietary tools
   ];
 
-  # ── Force FIFO mode in the DesignWare MMC driver ─────────────────────────────
+  # ── postPatch: make CMD51 (SEND_SCR) failure non-fatal ──────────────────────
   #
-  # Symptom: CMD17 (single-block data read) times out when fatload is called
-  # from BOOTCOMMAND, even though the card was accessible moments earlier during
-  # the Rockchip sd_update check.  Command-only transfers (CMD55, CMD16) work;
-  # data-bearing transfers (CMD17, CMD51 SEND_SCR) time out.
+  # Root cause of CMD17 / CMD51 timeouts:
+  #   The Rockchip "CLK: (sync kernel)" phase changes the source PLLs (gpll,
+  #   dpll, ...).  The DM MMC driver previously calculated its clock divider
+  #   against the old PLL frequencies.  After the PLL change the divider is
+  #   stale, so the actual card clock differs from the expected value — data
+  #   transfers (CMD17, CMD51) time out while short command-response transfers
+  #   (CMD55, CMD16) still appear to succeed because their windows are looser.
   #
-  # Root cause: the DW MMC driver uses an Internal DMA Controller (IDMAC) for
-  # data moves.  After the board CLK sync or Ethernet probe, the IDMAC descriptor
-  # list in DRAM is corrupted or its cache lines are stale.  Command-only transfers
-  # bypass IDMAC; data transfers depend on it and fail with -110 (timeout).
+  # Fix strategy:
+  #   1. BOOTCOMMAND runs "mmc dev 1; mmc rescan" before fatload.
+  #      mmc_rescan() clears has_init, then calls mmc_init() → set_ios() →
+  #      clk_set_rate() which recalculates the divider against the *new* PLL
+  #      frequencies.  After this the card clock is correct and CMD17 works.
   #
-  # Fix: prepend #define CONFIG_DW_MMC_USE_FIFO to dw_mmc.c so the driver uses
-  # CPU-polled FIFO mode for all data transfers.  This bypasses IDMAC entirely.
-  # We inject it via postPatch (source file) rather than the board config header
-  # because bare CONFIG_ symbols in board headers fail U-Boot's Kconfig ad-hoc
-  # CONFIG check (CONFIG_SYS_* is exempt; plain CONFIG_* is not).
+  #   2. During that reinit, mmc_startup() sends CMD51 (SEND_SCR) as the first
+  #      data transfer.  If CMD51 fires before the clock fully stabilises it
+  #      will time out.  We patch mmc_app_scr() so CMD51 failure is non-fatal:
+  #      use default SCR values (1-bit bus, SD 1.0) and continue.  This lets
+  #      mmc_init() complete and has_init get set even if CMD51 fails once.
+  #      After mmc rescan the subsequent fatload's CMD17 runs at the correct
+  #      52 MHz and succeeds.
   postPatch = ''
+    echo "=== postPatch: patching drivers/mmc/mmc.c — make CMD51 non-fatal ==="
+    python3 - << 'PYEOF'
+import sys
+
+with open('drivers/mmc/mmc.c', 'r') as f:
+    content = f.read()
+
+# Locate the mmc_app_scr function body (static int mmc_app_scr(...) { ... })
+func_sig = 'mmc_app_scr('
+idx = content.find(func_sig)
+if idx < 0:
+    print("  WARNING: mmc_app_scr not found in mmc.c — patch skipped")
+    sys.exit(0)
+
+brace = content.find('{', idx)
+if brace < 0:
+    print("  WARNING: function body brace not found — patch skipped")
+    sys.exit(0)
+
+# Walk braces to find the matching closing brace
+depth, pos, func_end = 0, brace, -1
+while pos < len(content):
+    if content[pos] == '{':  depth += 1
+    elif content[pos] == '}':
+        depth -= 1
+        if depth == 0:
+            func_end = pos; break
+    pos += 1
+
+if func_end < 0:
+    print("  WARNING: matching closing brace not found — patch skipped")
+    sys.exit(0)
+
+body = content[brace:func_end + 1]
+
+# The LAST 'return err;' in mmc_app_scr is after the CMD51 data read.
+# All earlier 'return err;' (after CMD13, CMD55) should remain fatal.
+last_ret = body.rfind('return err;')
+if last_ret < 0:
+    print("  WARNING: no 'return err;' found in mmc_app_scr body — patch skipped")
+    sys.exit(0)
+
+# Find the 'if (err)' that guards this return
+if_pos = body.rfind('if (err)', 0, last_ret)
+if if_pos < 0:
+    print("  WARNING: no 'if (err)' before last 'return err;' — patch skipped")
+    sys.exit(0)
+
+# Derive indentation from the 'if (err)' line
+line_start = body.rfind('\n', 0, if_pos) + 1
+indent = ''
+p = line_start
+while p < if_pos and body[p] in ' \t':
+    indent += body[p]; p += 1
+
+end_ret = last_ret + len('return err;')
+replacement = (
+    'if (err) {\n'
+    + indent + '\t/* CMD51 SEND_SCR timed out: use default SCR (1-bit, SD 1.0) */\n'
+    + indent + '\tscr_tmp[0] = 0;\n'
+    + indent + '\tscr_tmp[1] = 0;\n'
+    + indent + '\terr = 0;\n'
+    + indent + '}'
+)
+
+new_body = body[:if_pos] + replacement + body[end_ret:]
+new_content = content[:brace] + new_body + content[func_end + 1:]
+
+with open('drivers/mmc/mmc.c', 'w') as f:
+    f.write(new_content)
+
+print("  CMD51 (SEND_SCR) failure in mmc_app_scr() is now non-fatal (default SCR used)")
+PYEOF
+
+    # Legacy attempt: also try to inject FIFO mode into dw_mmc.c if present
+    # (no-op if the chip uses SDHCI instead).
     dwmmc="drivers/mmc/dw_mmc.c"
     if [ -f "$dwmmc" ]; then
-      echo "=== postPatch: injecting CONFIG_DW_MMC_USE_FIFO into $dwmmc ==="
-      # Prepend after any leading comment block, before the first #include.
-      # sed inserts before the first line matching '#include' — safe even if
-      # the file already has the define (idempotent due to #undef first).
-      sed -i '0,/#include/{s/#include/\n\/* nix-luckfox-builder: force FIFO mode — IDMAC broken after CLK sync *\/\n#undef  CONFIG_DW_MMC_USE_FIFO\n#define CONFIG_DW_MMC_USE_FIFO\n\n#include/}' "$dwmmc"
-      echo "  done"
+      echo "=== postPatch: $dwmmc found; injecting CONFIG_DW_MMC_USE_FIFO ==="
+      sed -i '0,/#include/{s/#include/\n\/* force FIFO mode — belt-and-suspenders against IDMAC issues *\/\n#undef  CONFIG_DW_MMC_USE_FIFO\n#define CONFIG_DW_MMC_USE_FIFO\n\n#include/}' "$dwmmc"
     else
-      echo "=== postPatch: $dwmmc not found — MMC may use SDHCI, not DWMMC; skipping ==="
-      echo "  (if CMD17 still fails, the driver is SDHCI-based and a different fix is needed)"
+      echo "=== postPatch: $dwmmc not found (SDHCI driver likely) — mmc rescan fix is the primary path ==="
     fi
   '';
 
@@ -216,9 +293,19 @@ pkgs.stdenv.mkDerivation {
 
     # Use Python to write BOOTCOMMAND to .config — the value contains embedded
     # double quotes which break sed when used inside a double-quoted expression.
+    # BOOTCOMMAND explanation:
+    #   mmc dev 1      — sets curr_device=1 in cmd/mmc.c so that subsequent
+    #                    'mmc rescan' targets the SD card (not device 0).
+    #   mmc rescan     — clears has_init, calls mmc_init() → set_ios() →
+    #                    clk_set_rate() to recalibrate the clock divider against
+    #                    the new PLL frequencies set by "CLK: (sync kernel)".
+    #                    After this CMD17 runs at the correct 52 MHz.
+    #   fatload ...    — reads boot.scr from the FAT boot partition.
+    #   && source ...  — executes boot.scr only if fatload succeeded, preventing
+    #                    a data-abort when running on uninitialised memory.
     python3 - << 'PYEOF'
 import re, sys
-bootcmd = r'CONFIG_BOOTCOMMAND="fatload mmc 1:1 0x43000000 boot.scr; source 0x43000000"'
+bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x43000000 boot.scr && source 0x43000000"'
 with open('.config') as f:
     content = f.read()
 if re.search(r'^CONFIG_BOOTCOMMAND=', content, re.MULTILINE):
@@ -242,7 +329,7 @@ PYEOF
     # Find and patch any such definitions to ensure our values take effect.
     for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY" include/configs/ 2>/dev/null); do
       if grep -q '#define CONFIG_BOOTCOMMAND' "$header"; then
-        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "fatload mmc 1:1 0x43000000 boot.scr; source 0x43000000"|' "$header"
+        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x43000000 boot.scr \&\& source 0x43000000"|' "$header"
         echo "  patched CONFIG_BOOTCOMMAND in $header"
       fi
       if grep -q '#define CONFIG_BOOTDELAY' "$header"; then
