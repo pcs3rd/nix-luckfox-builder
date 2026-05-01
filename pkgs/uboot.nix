@@ -165,11 +165,16 @@ pkgs.stdenv.mkDerivation {
     # 0x43000000 = 64 MiB above DRAM base: safe staging area for the script
     # (kernel/dtb/initramfs use 0x40200000–0x42xxxxxx, so no overlap).
     #
+    # 'fatload' is compiled into this SDK's U-Boot (confirmed: the pre-boot
+    # sd_update check uses it).  'load' (CONFIG_CMD_FS_GENERIC) is not.
+    # 'source' executes a mkimage-wrapped script; enable it explicitly.
+    enable_config CONFIG_CMD_SOURCE
+
     # Use Python to write BOOTCOMMAND to .config — the value contains embedded
     # double quotes which break sed when used inside a double-quoted expression.
     python3 - << 'PYEOF'
 import re, sys
-bootcmd = r'CONFIG_BOOTCOMMAND="load mmc 1:1 0x43000000 boot.scr; source 0x43000000"'
+bootcmd = r'CONFIG_BOOTCOMMAND="fatload mmc 1:1 0x43000000 boot.scr; source 0x43000000"'
 with open('.config') as f:
     content = f.read()
 if re.search(r'^CONFIG_BOOTCOMMAND=', content, re.MULTILINE):
@@ -193,7 +198,7 @@ PYEOF
     # Find and patch any such definitions to ensure our values take effect.
     for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY" include/configs/ 2>/dev/null); do
       if grep -q '#define CONFIG_BOOTCOMMAND' "$header"; then
-        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "load mmc 1:1 0x43000000 boot.scr; source 0x43000000"|' "$header"
+        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "fatload mmc 1:1 0x43000000 boot.scr; source 0x43000000"|' "$header"
         echo "  patched CONFIG_BOOTCOMMAND in $header"
       fi
       if grep -q '#define CONFIG_BOOTDELAY' "$header"; then
