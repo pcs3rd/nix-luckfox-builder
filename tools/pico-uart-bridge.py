@@ -14,6 +14,9 @@
 import machine
 import sys
 import select
+import micropython
+
+micropython.kbd_intr(-1)
 
 # Onboard LED: on = bridge running
 led = machine.Pin("LED", machine.Pin.OUT)
