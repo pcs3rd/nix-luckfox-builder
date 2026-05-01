@@ -65,14 +65,19 @@ let
     '';
 
   # ── U-Boot boot script (A/B mode) ────────────────────────────────────────
-  # Written to the ext4 boot partition (p1) as boot.scr (a compiled U-Boot
-  # script image).  U-Boot's distro_bootcmd finds and executes it.
+  # Written to the FAT boot partition (p1) as boot.scr (a compiled U-Boot
+  # script image).  BOOTCOMMAND loads and executes it.
   #
-  # Load addresses for 64 MB DRAM (base 0x40000000):
+  # RV1103 DRAM layout: 64 MB at physical 0x00000000–0x03FFFFFF.
+  # All 0x4xxxxxxx addresses are outside DRAM on this chip — using them as
+  # DMA destinations causes IDMAC AXI bus errors (CMD17 timeout -110).
   #
-  #   0x40200000  kernel_addr_r    (2 MB above base — avoids SPL/U-Boot area)
-  #   0x41E00000  fdt_addr_r       (30 MB above base — a few KB, between K+R)
-  #   0x42000000  ramdisk_addr_r   (32 MB above base — 32 MB for initramfs)
+  # Load addresses (within the 64 MB DRAM window):
+  #
+  #   0x00800000  kernel_addr_r    (8 MB mark — clear of U-Boot/SPL area)
+  #   0x01E00000  fdt_addr_r       (30 MB mark — a few KB, between K+R)
+  #   0x02000000  ramdisk_addr_r   (32 MB mark — initramfs; U-Boot heap is
+  #                                 at ~0x02df0000 so keep initramfs <14 MB)
   #
   # Robustness: we try two load strategies so the script works with any
   # Rockchip U-Boot (ours or the Ubuntu demo's), regardless of whether
@@ -86,9 +91,9 @@ let
   # loaded at the same addresses and bootz is called identically.
   abBootScript = pkgs.writeText "ab-boot-script.txt" ''
     echo "=== nix-luckfox A/B boot ==="
-    setenv kernel_addr_r  0x40200000
-    setenv fdt_addr_r     0x41E00000
-    setenv ramdisk_addr_r 0x42000000
+    setenv kernel_addr_r  0x00800000
+    setenv fdt_addr_r     0x01E00000
+    setenv ramdisk_addr_r 0x02000000
     setenv bootargs "${config.boot.cmdline}"
 
     ${if config.device.dtb != null then ''
@@ -242,13 +247,13 @@ PYEOF
     # No extlinux/extlinux.conf is created here.  U-Boot 2026.01 scans boot
     # methods in priority order: extlinux (seq 1) beats script/boot.scr (seq 2).
     # If extlinux.conf is present, U-Boot uses it and applies its default
-    # ramdisk_addr_r (0x44000000 on QEMU ARM) — exactly at the 64 MB boundary —
-    # causing a virtio DMA fault before the kernel even starts.
+    # ramdisk_addr_r (0x44000000 on QEMU ARM) — outside the RV1103 64 MB DRAM
+    # window — causing a DMA bus error before the kernel even starts.
     #
-    # boot.scr (script bootmeth) explicitly sets 64 MB-safe load addresses:
-    #   kernel_addr_r  0x40200000
-    #   fdt_addr_r     0x41E00000
-    #   ramdisk_addr_r 0x42000000
+    # boot.scr explicitly sets DRAM-safe load addresses (0x00000000–0x03FFFFFF):
+    #   kernel_addr_r  0x00800000
+    #   fdt_addr_r     0x01E00000
+    #   ramdisk_addr_r 0x02000000
     # Keeping extlinux.conf absent forces U-Boot to fall through to boot.scr.
     mkdir -p boot-staging
 

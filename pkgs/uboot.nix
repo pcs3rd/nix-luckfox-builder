@@ -69,27 +69,24 @@ pkgs.stdenv.mkDerivation {
 
   # ── postPatch: make CMD51 (SEND_SCR) failure non-fatal ──────────────────────
   #
-  # Root cause of CMD17 / CMD51 timeouts:
-  #   The Rockchip "CLK: (sync kernel)" phase changes the source PLLs (gpll,
-  #   dpll, ...).  The DM MMC driver previously calculated its clock divider
-  #   against the old PLL frequencies.  After the PLL change the divider is
-  #   stale, so the actual card clock differs from the expected value — data
-  #   transfers (CMD17, CMD51) time out while short command-response transfers
-  #   (CMD55, CMD16) still appear to succeed because their windows are looser.
+  # Root cause of CMD17 / CMD51 timeouts (confirmed experimentally):
+  #   RV1103 DRAM sits at physical 0x00000000–0x03FFFFFF (64 MB).  The original
+  #   BOOTCOMMAND used load addresses in the 0x4xxxxxxx range (e.g. 0x43000000)
+  #   which are outside DRAM.  The DW MSHC IDMAC issues a DMA write to the
+  #   unmapped AXI address → bus error → CMD17 timeout (-110 ETIMEDOUT).
+  #   Confirmed: `mmc read 0x02000000 …` succeeded; `mmc read 0x43000000 …` failed.
+  #   U-Boot's own DBADDR (0x02df1880) and relocation offset (0x03d75000) place
+  #   all internal allocations within the 64 MB window, confirming the layout.
   #
-  # Fix strategy:
-  #   1. BOOTCOMMAND runs "mmc dev 1; mmc rescan" before fatload.
-  #      mmc_rescan() clears has_init, then calls mmc_init() → set_ios() →
-  #      clk_set_rate() which recalculates the divider against the *new* PLL
-  #      frequencies.  After this the card clock is correct and CMD17 works.
+  # The BOOTCOMMAND now uses 0x00300000 for boot.scr — well within DRAM.
+  # boot.scr uses 0x00800000/0x01E00000/0x02000000 for kernel/fdt/ramdisk.
   #
-  #   2. During that reinit, mmc_startup() sends CMD51 (SEND_SCR) as the first
-  #      data transfer.  If CMD51 fires before the clock fully stabilises it
-  #      will time out.  We patch mmc_app_scr() so CMD51 failure is non-fatal:
-  #      use default SCR values (1-bit bus, SD 1.0) and continue.  This lets
-  #      mmc_init() complete and has_init get set even if CMD51 fails once.
-  #      After mmc rescan the subsequent fatload's CMD17 runs at the correct
-  #      52 MHz and succeeds.
+  # CMD51 (SEND_SCR) patch — belt-and-suspenders:
+  #   mmc rescan reinitialises the card protocol.  During mmc_startup(), CMD51
+  #   is the first data transfer.  On some boards it times out on the first
+  #   attempt (the card clock may not be fully stable immediately after set_ios).
+  #   Making CMD51 non-fatal lets mmc_init() complete with a default SCR (1-bit,
+  #   SD 1.0) so subsequent CMD17 to valid DRAM addresses works correctly.
   postPatch = ''
     echo "=== postPatch: patching drivers/mmc/mmc.c — make CMD51 non-fatal ==="
     python3 - << 'PYEOF'
@@ -271,8 +268,11 @@ PYEOF
     # The generic 'load' command (CONFIG_CMD_FS_GENERIC) auto-detects FAT and
     # is compiled into this SDK's U-Boot; no ext4load or distro_bootcmd needed.
     #
-    # 0x43000000 = 64 MiB above DRAM base: safe staging area for the script
-    # (kernel/dtb/initramfs use 0x40200000–0x42xxxxxx, so no overlap).
+    # RV1103 DRAM layout: 64 MB at physical 0x00000000–0x03FFFFFF.
+    # All 0x4xxxxxxx addresses are OUTSIDE DRAM and cause IDMAC AXI bus errors
+    # (reported as CMD17 timeout -110).  Use low addresses within DRAM:
+    #   0x00300000 = boot.scr staging (3 MB mark — tiny script, safe here)
+    #   kernel/dtb/initramfs use 0x00800000/0x01E00000/0x02000000 in boot.scr
     #
     # 'fatload' is compiled into this SDK's U-Boot (confirmed: the pre-boot
     # sd_update check uses it).  'load' (CONFIG_CMD_FS_GENERIC) is not.
@@ -305,7 +305,7 @@ PYEOF
     #                    a data-abort when running on uninitialised memory.
     python3 - << 'PYEOF'
 import re, sys
-bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x43000000 boot.scr && source 0x43000000"'
+bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x00300000 boot.scr && source 0x00300000"'
 with open('.config') as f:
     content = f.read()
 if re.search(r'^CONFIG_BOOTCOMMAND=', content, re.MULTILINE):
@@ -329,7 +329,7 @@ PYEOF
     # Find and patch any such definitions to ensure our values take effect.
     for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY" include/configs/ 2>/dev/null); do
       if grep -q '#define CONFIG_BOOTCOMMAND' "$header"; then
-        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x43000000 boot.scr \&\& source 0x43000000"|' "$header"
+        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x00300000 boot.scr \&\& source 0x00300000"|' "$header"
         echo "  patched CONFIG_BOOTCOMMAND in $header"
       fi
       if grep -q '#define CONFIG_BOOTDELAY' "$header"; then
