@@ -102,7 +102,7 @@ let
         echo "Loading via distro vars: ''${devtype} ''${devnum}:''${distro_bootpart}"
         fatload ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r}  /zImage
         fatload ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r}     /board.dtb
-        fatload ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initrd.gz
+        fatload ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initrd.img
       else
         # Strategy B: hardcoded mmc 1:1
         # On RV1103/Luckfox Mini A: mmc@ffa90000 = slot 0 (empty internal),
@@ -110,7 +110,7 @@ let
         echo "Loading via mmc 1:1 (no distro vars set)"
         fatload mmc 1:1 ''${kernel_addr_r}  /zImage
         fatload mmc 1:1 ''${fdt_addr_r}     /board.dtb
-        fatload mmc 1:1 ''${ramdisk_addr_r} /initrd.gz
+        fatload mmc 1:1 ''${ramdisk_addr_r} /initrd.img
       fi
       echo "bootargs: ''${bootargs}"
       bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
@@ -122,11 +122,11 @@ let
       if test -n "''${devtype}"; then
         echo "Loading via distro vars: ''${devtype} ''${devnum}:''${distro_bootpart}"
         ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r}  /zImage
-        ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initrd.gz
+        ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initrd.img
       else
         echo "Loading via mmc 1:1"
         fatload mmc 1:1 ''${kernel_addr_r}  /zImage
-        fatload mmc 1:1 ''${ramdisk_addr_r} /initrd.gz
+        fatload mmc 1:1 ''${ramdisk_addr_r} /initrd.img
       fi
       echo "bootargs: ''${bootargs}"
       fdt move ''${fdtcontroladdr} ''${fdt_addr_r} 0x100000
@@ -272,8 +272,16 @@ PYEOF
     ''}
 
     # Slot-select initramfs handles squashfs mount + overlay setup.
-    cp ${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz \
-       boot-staging/initrd.gz
+    # Wrap in a legacy mkimage ramdisk header so U-Boot's bootz explicitly
+    # recognises the image, extracts address+size from the header, and writes
+    # linux,initrd-start / linux,initrd-end into the FDT correctly.
+    # Without the header, bootz relies on the addr:${filesize} raw-cpio path
+    # which silently fails on the Luckfox SDK U-Boot 2017.09.
+    # initrd.img = 8.3-compatible filename (safe without LFN support in U-Boot).
+    mkimage -A arm -O linux -T ramdisk -C gzip -a 0x02000000 -e 0x02000000 \
+      -n "slot-select" \
+      -d ${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz \
+      boot-staging/initrd.img
 
     # Compiled U-Boot boot script — the sole boot path for A/B images.
     mkimage -A arm -O linux -T script -C none -a 0 -e 0 \
@@ -297,7 +305,7 @@ PYEOF
     ${lib.optionalString (config.device.dtb != null) ''
       mcopy -i boot.img boot-staging/${config.device.name}.dtb ::board.dtb
     ''}
-    mcopy -i boot.img boot-staging/initrd.gz ::initrd.gz
+    mcopy -i boot.img boot-staging/initrd.img ::initrd.img
     mcopy -i boot.img boot-staging/boot.scr ::boot.scr
 
     dd if=boot.img of=$out/sd-flashable.img bs=512 seek=$BOOT_START conv=notrunc 2>/dev/null

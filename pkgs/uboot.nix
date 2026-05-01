@@ -310,13 +310,16 @@ PYEOF
     #                    MMC clock divider after U-Boot relocation.
     #   fatload x3     — loads zImage, board.dtb, and the slot-select initramfs
     #                    from the FAT boot partition into DRAM-safe addresses.
-    #                    initramfs is named initrd.gz (8.3-compatible) because
-    #                    the Luckfox SDK U-Boot 2017.09 may lack LFN support.
-    #   bootz ...      — starts the kernel.  ramdisk spec is addr:size where
-    #                    ''${filesize} is the byte count set by the last fatload.
+    #                    initrd.img is a legacy mkimage ramdisk image (8.3 name)
+    #                    so bootz parses the 64-byte header and writes correct
+    #                    linux,initrd-start/end into the FDT.  Raw cpio.gz with
+    #                    addr:${filesize} silently failed on this SDK's bootz.
+    #   bootz ...      — starts the kernel.  ramdisk addr is the legacy image
+    #                    address; bootz reads size from the mkimage header,
+    #                    no :${filesize} needed.
     python3 - << 'PYEOF'
 import re, sys
-bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x00800000 zImage; fatload mmc 1:1 0x01E00000 board.dtb; fatload mmc 1:1 0x02000000 initrd.gz; bootz 0x00800000 0x02000000:''${filesize} 0x01E00000"'
+bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x00800000 zImage; fatload mmc 1:1 0x01E00000 board.dtb; fatload mmc 1:1 0x02000000 initrd.img; bootz 0x00800000 0x02000000 0x01E00000"'
 bootargs = 'CONFIG_BOOTARGS="${cmdline}"'
 with open('.config') as f:
     content = f.read()
@@ -343,7 +346,7 @@ PYEOF
     # Find and patch any such definitions to ensure our values take effect.
     for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY\|CONFIG_BOOTARGS" include/configs/ 2>/dev/null); do
       if grep -q '#define CONFIG_BOOTCOMMAND' "$header"; then
-        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x00800000 zImage; fatload mmc 1:1 0x01E00000 board.dtb; fatload mmc 1:1 0x02000000 initrd.gz; bootz 0x00800000 0x02000000:''${filesize} 0x01E00000"|' "$header"
+        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x00800000 zImage; fatload mmc 1:1 0x01E00000 board.dtb; fatload mmc 1:1 0x02000000 initrd.img; bootz 0x00800000 0x02000000 0x01E00000"|' "$header"
         echo "  patched CONFIG_BOOTCOMMAND in $header"
       fi
       if grep -q '#define CONFIG_BOOTDELAY' "$header"; then
