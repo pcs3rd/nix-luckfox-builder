@@ -217,13 +217,27 @@ PYEOF
         sed -i 's|#define CONFIG_BOOTDELAY .*|#define CONFIG_BOOTDELAY 2|' "$header"
         echo "  patched CONFIG_BOOTDELAY in $header"
       fi
-      # Force single-block MMC reads (CMD17 instead of CMD18).
-      # On RV1103 the DM MMC driver's multi-block path calls mmc_init() when
-      # reads fail, which then hangs on CMD51 (SEND_SCR) — this prevents fatload
-      # from reading any file data.  Single-block reads (CMD17) work correctly.
-      # Setting MAX_BLK_COUNT=1 makes every read a single-block transfer.
+      # Force FIFO (polling) mode in the DesignWare MMC driver.
+      #
+      # Symptom: CMD17 (single-block data read) times out when fatload is called
+      # from BOOTCOMMAND, even though the card was accessible moments earlier
+      # during the Rockchip sd_update check.  Command-only transfers (CMD55,
+      # CMD16) succeed; data-bearing transfers (CMD17, CMD51 SEND_SCR) time out.
+      #
+      # Root cause: the DW MMC driver uses an Internal DMA Controller (IDMAC)
+      # for data transfers.  After the board CLK sync or Ethernet probe, the
+      # IDMAC descriptor list in DRAM is likely corrupted or its cache lines are
+      # stale.  Command-only transfers bypass IDMAC; data transfers rely on it.
+      #
+      # Fix: CONFIG_DW_MMC_USE_FIFO switches the driver to CPU-polled FIFO mode,
+      # bypassing IDMAC entirely.  Transfers are slower (~8 MB/s) but reliable.
       echo "" >> "$header"
-      echo "/* Force single-block MMC reads — CMD18 fails on RV1103 DM MMC */" >> "$header"
+      echo "/* CPU-polled FIFO mode — bypasses broken IDMAC after CLK sync */" >> "$header"
+      echo "#undef  CONFIG_DW_MMC_USE_FIFO" >> "$header"
+      echo "#define CONFIG_DW_MMC_USE_FIFO" >> "$header"
+      echo "  added CONFIG_DW_MMC_USE_FIFO to $header"
+      # Belt-and-suspenders: also cap block count at 1 so multi-block CMD18
+      # is never issued even if FIFO mode is not effective on this SoC's driver.
       echo "#undef  CONFIG_SYS_MMC_MAX_BLK_COUNT" >> "$header"
       echo "#define CONFIG_SYS_MMC_MAX_BLK_COUNT 1" >> "$header"
       echo "  added CONFIG_SYS_MMC_MAX_BLK_COUNT=1 to $header"
