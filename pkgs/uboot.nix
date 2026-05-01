@@ -15,7 +15,7 @@
 #
 # ────────────────────────────────────────────────────────────────────────────
 
-{ pkgs }:
+{ pkgs, cmdline ? "rootwait" }:
 
 let
   LUCKFOX_REV    = "824b817f889c2cbff1d48fcdb18ab494a68f69d1";
@@ -257,20 +257,37 @@ PYEOF
 
     # CONFIG_DISTRO_DEFAULTS is not a recognized Kconfig symbol in this SDK's
     # U-Boot 2017.09 — it gets silently stripped by olddefconfig, so
-    # distro_bootcmd is never defined.  Instead, set BOOTCOMMAND to directly
-    # load and execute boot.scr from the FAT boot partition (mmc 1:1).
-    # The generic 'load' command (CONFIG_CMD_FS_GENERIC) auto-detects FAT and
-    # is compiled into this SDK's U-Boot; no ext4load or distro_bootcmd needed.
+    # distro_bootcmd is never defined.  Instead, BOOTCOMMAND directly loads
+    # zImage, board.dtb, and the slot-select initramfs from the FAT boot
+    # partition (mmc 1:1) and calls bootz to start the kernel.
+    #
+    # The 'source' command was tried (loading a mkimage-wrapped boot.scr) but
+    # the Luckfox SDK's U-Boot 2017.09 source command executes garbage from
+    # the script image — a bug in the SDK's patched cmd/source.c.  BOOTCOMMAND
+    # is therefore written to perform the full load sequence inline without
+    # boot.scr.  boot.scr is still compiled and placed on the FAT partition for
+    # manual debugging (interrupt U-Boot, then load and examine it by hand).
     #
     # RV1103 DRAM layout: 64 MB at physical 0x00000000–0x03FFFFFF.
     # All 0x4xxxxxxx addresses are OUTSIDE DRAM and cause IDMAC AXI bus errors
     # (reported as CMD17 timeout -110).  Use low addresses within DRAM:
-    #   0x00300000 = boot.scr staging (3 MB mark — tiny script, safe here)
-    #   kernel/dtb/initramfs use 0x00800000/0x01E00000/0x02000000 in boot.scr
+    #   0x00800000 — kernel_addr_r    (8 MB mark — above U-Boot/SPL area)
+    #   0x01E00000 — fdt_addr_r       (30 MB mark — DTB is only a few KB)
+    #   0x02000000 — ramdisk_addr_r   (32 MB mark — initramfs)
     #
-    # 'fatload' is compiled into this SDK's U-Boot (confirmed: the pre-boot
-    # sd_update check uses it).  'load' (CONFIG_CMD_FS_GENERIC) is not.
-    # 'source' executes a mkimage-wrapped script; enable it explicitly.
+    # Load order matters: the last fatload sets 'filesize'.  Load the initramfs
+    # last so ''${filesize} in the bootz ramdisk spec is the initramfs byte count.
+    #
+    # board.dtb is the fixed filename in the FAT boot partition.  sdimage.nix
+    # copies the board-specific DTB to this name so BOOTCOMMAND can reference
+    # a stable filename regardless of the device.name value.
+    #
+    # CONFIG_BOOTARGS is set from the cmdline parameter passed at build time
+    # (the NixOS boot.cmdline module option).  U-Boot initialises the 'bootargs'
+    # env variable from CONFIG_BOOTARGS before BOOTCOMMAND runs.
+    #
+    # 'source' is still enabled so it is available for manual debugging at
+    # the U-Boot prompt.
     enable_config CONFIG_CMD_SOURCE
 
     # ── MMC multi-block read workaround ───────────────────────────────────────
@@ -285,30 +302,31 @@ PYEOF
     disable_config CONFIG_MMC_HS400_SUPPORT
     disable_config CONFIG_MMC_HS200_SUPPORT
 
-    # Use Python to write BOOTCOMMAND to .config — the value contains embedded
-    # double quotes which break sed when used inside a double-quoted expression.
-    # BOOTCOMMAND explanation:
-    #   mmc dev 1      — sets curr_device=1 in cmd/mmc.c so that subsequent
-    #                    'mmc rescan' targets the SD card (not device 0).
-    #   mmc rescan     — clears has_init, calls mmc_init() → set_ios() →
-    #                    clk_set_rate() to recalibrate the clock divider against
-    #                    the new PLL frequencies set by "CLK: (sync kernel)".
-    #                    After this CMD17 runs at the correct 52 MHz.
-    #   fatload ...    — reads boot.scr from the FAT boot partition.
-    #   && source ...  — executes boot.scr only if fatload succeeded, preventing
-    #                    a data-abort when running on uninitialised memory.
+    # Use Python to write BOOTCOMMAND and BOOTARGS to .config.  Both values
+    # contain embedded double quotes which break sed inside double-quoted shell
+    # expressions.  BOOTCOMMAND explanation:
+    #   mmc dev 1      — sets curr_device=1 so 'mmc rescan' targets the SD card.
+    #   mmc rescan     — clears has_init, calls mmc_init() to recalibrate the
+    #                    MMC clock divider after U-Boot relocation.
+    #   fatload x3     — loads zImage, board.dtb, and the slot-select initramfs
+    #                    from the FAT boot partition into DRAM-safe addresses.
+    #   bootz ...      — starts the kernel.  ramdisk spec is addr:size where
+    #                    ''${filesize} is the byte count set by the last fatload.
     python3 - << 'PYEOF'
 import re, sys
-bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x00300000 boot.scr && source 0x00300000"'
+bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x00800000 zImage; fatload mmc 1:1 0x01E00000 board.dtb; fatload mmc 1:1 0x02000000 initramfs-slotselect.cpio.gz; bootz 0x00800000 0x02000000:''${filesize} 0x01E00000"'
+bootargs = 'CONFIG_BOOTARGS="${cmdline}"'
 with open('.config') as f:
     content = f.read()
-if re.search(r'^CONFIG_BOOTCOMMAND=', content, re.MULTILINE):
-    content = re.sub(r'^CONFIG_BOOTCOMMAND=.*', bootcmd, content, flags=re.MULTILINE)
-else:
-    content += bootcmd + '\n'
+for key, val in [('CONFIG_BOOTCOMMAND', bootcmd), ('CONFIG_BOOTARGS', bootargs)]:
+    if re.search(r'^' + key + r'=', content, re.MULTILINE):
+        content = re.sub(r'^' + key + r'=.*', val, content, flags=re.MULTILINE)
+    else:
+        content += val + '\n'
 with open('.config', 'w') as f:
     f.write(content)
 print('  set ' + bootcmd)
+print('  set ' + bootargs)
 PYEOF
 
     # Boot delay: 2 seconds — enough time to interrupt over serial (any key at
@@ -321,19 +339,21 @@ PYEOF
     # C headers.  A C-header #define wins over a .config Kconfig value, so
     # the Kconfig changes above would have no effect if headers also define them.
     # Find and patch any such definitions to ensure our values take effect.
-    for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY" include/configs/ 2>/dev/null); do
+    for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY\|CONFIG_BOOTARGS" include/configs/ 2>/dev/null); do
       if grep -q '#define CONFIG_BOOTCOMMAND' "$header"; then
-        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x00300000 boot.scr \&\& source 0x00300000"|' "$header"
+        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x00800000 zImage; fatload mmc 1:1 0x01E00000 board.dtb; fatload mmc 1:1 0x02000000 initramfs-slotselect.cpio.gz; bootz 0x00800000 0x02000000:''${filesize} 0x01E00000"|' "$header"
         echo "  patched CONFIG_BOOTCOMMAND in $header"
       fi
       if grep -q '#define CONFIG_BOOTDELAY' "$header"; then
         sed -i 's|#define CONFIG_BOOTDELAY .*|#define CONFIG_BOOTDELAY 2|' "$header"
         echo "  patched CONFIG_BOOTDELAY in $header"
       fi
+      if grep -q '#define CONFIG_BOOTARGS' "$header"; then
+        sed -i 's|#define CONFIG_BOOTARGS .*|#define CONFIG_BOOTARGS "${cmdline}"|' "$header"
+        echo "  patched CONFIG_BOOTARGS in $header"
+      fi
       # Belt-and-suspenders: cap block count at 1 to prevent CMD18 multi-block
-      # transfers.  CONFIG_DW_MMC_USE_FIFO (FIFO/polling mode to fix broken IDMAC)
-      # is injected into drivers/mmc/dw_mmc.c via postPatch instead of here,
-      # because bare CONFIG_ symbols in board headers fail the Kconfig ad-hoc check.
+      # transfers.
       echo "" >> "$header"
       echo "#undef  CONFIG_SYS_MMC_MAX_BLK_COUNT" >> "$header"
       echo "#define CONFIG_SYS_MMC_MAX_BLK_COUNT 1" >> "$header"

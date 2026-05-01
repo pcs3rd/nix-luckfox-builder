@@ -81,15 +81,13 @@ in
   #
   system.abRootfs = {
     enable      = true;
-    slotSize     = 64;   # 64 MiB per slot, explicit
-    swapSize    = 0;   # MiB of disk swap in persist partition — disable with 0
-    persistSize = 0;   # MiB for overlayfs upper/work dirs (default 256 is excessive)
+    slotSize    = 64;   # 64 MiB per slot, explicit
+    swapSize    = 0;    # MiB of disk swap in persist partition — disable with 0
+    persistSize = 32;   # MiB for overlayfs upper/work dirs (must be > 0)
   };
 
-  # Total SD image size in MiB.  Slots get whatever's left after boot + persist:
-  #   512 MiB − 2 MiB gap − 64 MiB boot − 64 MiB persist = 382 MiB ÷ 2 = 191 MiB/slot
-  # Increase if your rootfs squashfs ever exceeds ~150 MiB. 
-  # If this is set to 0, auto-calculate from system.abRootfs.
+  # Total SD image size auto-calculated from abRootfs sizes:
+  #   2 MiB gap + 64 MiB boot + 64 MiB slot-A + 64 MiB slot-B + 32 MiB persist = 226 MiB
   system.imageSize = 0;
   # ── Services ────────────────────────────────────────────────────────────────
 

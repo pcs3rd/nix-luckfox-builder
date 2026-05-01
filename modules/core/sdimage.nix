@@ -101,7 +101,7 @@ let
       if test -n "''${devtype}"; then
         echo "Loading via distro vars: ''${devtype} ''${devnum}:''${distro_bootpart}"
         fatload ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r}  /zImage
-        fatload ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r}     /${config.device.name}.dtb
+        fatload ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r}     /board.dtb
         fatload ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
       else
         # Strategy B: hardcoded mmc 1:1
@@ -109,7 +109,7 @@ let
         # mmc@ffaa0000 = slot 1 (SD card).  The SD card is ALWAYS mmc 1.
         echo "Loading via mmc 1:1 (no distro vars set)"
         fatload mmc 1:1 ''${kernel_addr_r}  /zImage
-        fatload mmc 1:1 ''${fdt_addr_r}     /${config.device.name}.dtb
+        fatload mmc 1:1 ''${fdt_addr_r}     /board.dtb
         fatload mmc 1:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
       fi
       echo "bootargs: ''${bootargs}"
@@ -169,6 +169,13 @@ in
 
     BOOT_SIZE_SECTORS=$(( ${toString abCfg.bootPartSize} * 2048 ))
     PERSIST_SIZE_SECTORS=$(( ${toString abCfg.persistSize} * 2048 ))
+    if [ "$PERSIST_SIZE_SECTORS" -le 0 ]; then
+      echo "ERROR: system.abRootfs.persistSize must be > 0 when abRootfs.enable = true." >&2
+      echo "  Current value: ${toString abCfg.persistSize} MiB  →  0 sectors." >&2
+      echo "  The persist partition holds overlayfs upper/work dirs for both A/B slots." >&2
+      echo "  Set system.abRootfs.persistSize to at least 32 (32 MiB is a reasonable minimum)." >&2
+      exit 1
+    fi
     AVAILABLE_SECTORS=$(( TOTAL_SECTORS - SECTOR ))
     ${if abCfg.slotSize != 0 then ''
     # Explicit slot size from system.abRootfs.slotSize.
@@ -288,7 +295,7 @@ PYEOF
       mcopy -i boot.img boot-staging/zImage ::zImage
     ''}
     ${lib.optionalString (config.device.dtb != null) ''
-      mcopy -i boot.img boot-staging/${config.device.name}.dtb ::${config.device.name}.dtb
+      mcopy -i boot.img boot-staging/${config.device.name}.dtb ::board.dtb
     ''}
     mcopy -i boot.img boot-staging/initramfs-slotselect.cpio.gz ::initramfs-slotselect.cpio.gz
     mcopy -i boot.img boot-staging/boot.scr ::boot.scr

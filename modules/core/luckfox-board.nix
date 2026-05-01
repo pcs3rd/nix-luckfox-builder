@@ -58,8 +58,10 @@ in
   config = lib.mkIf cfg.support (
     let
       # Lazily imported — only evaluated when luckfox.support = true.
-      localPkgs     = import ../../pkgs { inherit pkgs; };
       luckfoxKernel = import ../../pkgs/luckfox-kernel.nix { inherit pkgs; };
+      # U-Boot is built with the system boot.cmdline baked in as CONFIG_BOOTARGS.
+      # BOOTCOMMAND loads zImage/board.dtb/initramfs directly (no boot.scr/source).
+      uboot = import ../../pkgs/uboot.nix { inherit pkgs; cmdline = config.boot.cmdline; };
 
       # DTB selection: prefer board-specific, fall back to EVB generic.
       # builtins.pathExists checks the Nix store at eval time; returns false on
@@ -95,7 +97,7 @@ in
           # project/image/ pre-builts vary by board and the mkimage -T rksd
           # approach has chip-name limitations in U-Boot 2017.09.
           spl     = lib.mkDefault ../../hardware/rv1103/idblock.img;
-          package = lib.mkDefault "${localPkgs.uboot}/u-boot.img";
+          package = lib.mkDefault "${uboot}/u-boot.img";
         };
 
         # Slot indicator byte lives at byte 512 (between MBR and SPL sector 64).
