@@ -348,7 +348,7 @@ PYEOF
     #                        without clearing our /chosen properties.
     python3 - << 'PYEOF'
 import re, sys
-bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x800000 zImage; fatload mmc 1:1 0x1E00000 board.dtb; fdt addr 0x1E00000; fatload mmc 1:1 0x2000000 initrd.img; setexpr re 0x2000000 + 0x${filesize}; fdt chosen 0x2000040 ${re}; bootz 0x800000 - 0x1E00000"'
+bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x800000 zImage; fatload mmc 1:1 0x1E00000 board.dtb; fdt addr 0x1E00000; fatload mmc 1:1 0x2000000 initrd.img; setexpr re 0x2000000 + 0x''${filesize}; fdt chosen 0x2000040 ''${re}; bootz 0x800000 - 0x1E00000"'
 bootargs = 'CONFIG_BOOTARGS="${cmdline}"'
 with open('.config') as f:
     content = f.read()
