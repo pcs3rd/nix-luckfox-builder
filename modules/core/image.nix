@@ -40,6 +40,14 @@ in
     ];
   } ''
     IMAGE_MB=${toString config.system.imageSize}
+    if [ "$IMAGE_MB" -le 0 ]; then
+      echo "ERROR: system.imageSize must be > 0 for system.build.image." >&2
+      echo "  You have system.imageSize = 0 (auto-calculation mode)." >&2
+      echo "  image.nix does not support auto-calculation." >&2
+      echo "  Either set system.imageSize to a positive value (e.g. 256)," >&2
+      echo "  or build .#sdImage-flashable (sdimage.nix, A/B layout) instead." >&2
+      exit 1
+    fi
     IMAGE_BYTES=$(( IMAGE_MB * 1024 * 1024 ))
     PART_START_SECTOR=2048          # 1 MiB gap (standard for SD cards)
     PART_START_BYTES=$(( PART_START_SECTOR * 512 ))
