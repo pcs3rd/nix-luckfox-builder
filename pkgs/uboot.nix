@@ -129,6 +129,41 @@ pkgs.stdenv.mkDerivation {
     # EFI partition scanning is only needed for EFI boot paths.
     disable_config CONFIG_SPL_EFI_PARTITION
 
+    # ── Enable distro_bootcmd ─────────────────────────────────────────────────
+    # The Luckfox SDK's default U-Boot uses Rockchip's proprietary boot path
+    # which looks for GPT partitions named "boot"/"misc" and Android FIT images.
+    # Our image uses a standard DOS MBR with an ext4 boot partition and boot.scr.
+    #
+    # CONFIG_DISTRO_DEFAULTS enables distro_bootcmd, which scans MMC/USB/... for
+    # boot.scr (and extlinux.conf) — exactly what we need.
+    #
+    # Also set the default boot device to mmc 1 (SD card on RV1103):
+    #   mmc@ffa90000 = slot 0 (no physical card on Mini A/B)
+    #   mmc@ffaa0000 = slot 1 (SD card — always slot 1)
+    enable_config() {
+      if grep -q "^# $1 is not set" .config; then
+        sed -i "s/^# $1 is not set/$1=y/" .config
+      elif ! grep -q "^$1=" .config; then
+        echo "$1=y" >> .config
+      fi
+    }
+    set_config_str() {
+      if grep -q "^$1=" .config; then
+        sed -i "s|^$1=.*|$1=$2|" .config
+      else
+        echo "$1=$2" >> .config
+      fi
+    }
+
+    enable_config CONFIG_DISTRO_DEFAULTS
+    # DISTRO_DEFAULTS pulls in CONFIG_BOOTCOMMAND="run distro_bootcmd", which
+    # scans each MMC slot for extlinux.conf / boot.scr in order.
+    # Restrict the scan to MMC only (no USB/PXE/DHCP delays on this board).
+    set_config_str CONFIG_DISTRO_BOOT_TARGETS '"mmc"'
+    # Boot delay: 0 seconds so the board doesn't pause at the U-Boot prompt.
+    # Hit any key over serial to interrupt and get the => prompt.
+    set_config_str CONFIG_BOOTDELAY 0
+
     # Recalculate Kconfig dependencies after the above changes.
     make \
       ARCH=arm \

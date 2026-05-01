@@ -82,11 +82,13 @@ let
         ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${fdt_addr_r}     /${config.device.name}.dtb
         ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
       else
-        # Strategy B: hardcoded mmc 0:1 (SD card always slot 0, boot part always p1)
-        echo "Loading via mmc 0:1 (no distro vars set)"
-        ext4load mmc 0:1 ''${kernel_addr_r}  /zImage
-        ext4load mmc 0:1 ''${fdt_addr_r}     /${config.device.name}.dtb
-        ext4load mmc 0:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
+        # Strategy B: hardcoded mmc 1:1
+        # On RV1103/Luckfox Mini A: mmc@ffa90000 = slot 0 (empty internal),
+        # mmc@ffaa0000 = slot 1 (SD card).  The SD card is ALWAYS mmc 1.
+        echo "Loading via mmc 1:1 (no distro vars set)"
+        ext4load mmc 1:1 ''${kernel_addr_r}  /zImage
+        ext4load mmc 1:1 ''${fdt_addr_r}     /${config.device.name}.dtb
+        ext4load mmc 1:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
       fi
       echo "bootargs: ''${bootargs}"
       bootz ''${kernel_addr_r} ''${ramdisk_addr_r}:''${filesize} ''${fdt_addr_r}
@@ -100,9 +102,9 @@ let
         ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${kernel_addr_r}  /zImage
         ext4load ''${devtype} ''${devnum}:''${distro_bootpart} ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
       else
-        echo "Loading via mmc 0:1"
-        ext4load mmc 0:1 ''${kernel_addr_r}  /zImage
-        ext4load mmc 0:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
+        echo "Loading via mmc 1:1"
+        ext4load mmc 1:1 ''${kernel_addr_r}  /zImage
+        ext4load mmc 1:1 ''${ramdisk_addr_r} /initramfs-slotselect.cpio.gz
       fi
       echo "bootargs: ''${bootargs}"
       fdt move ''${fdtcontroladdr} ''${fdt_addr_r} 0x100000
