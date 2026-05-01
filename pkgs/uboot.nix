@@ -138,7 +138,7 @@ if if_pos < 0:
 
 # Derive indentation from the 'if (err)' line
 line_start = body.rfind('\n', 0, if_pos) + 1
-indent = ''
+indent = '''
 p = line_start
 while p < if_pos and body[p] in ' \t':
     indent += body[p]; p += 1
