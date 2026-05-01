@@ -160,7 +160,6 @@
 
       # ── System evaluations ──────────────────────────────────────────────────
       picoMiniB         = mkSystem   { configuration = ./configuration.nix;             };
-      picoMiniB-qemu    = mkSystem   { configuration = ./configurations/qemu-test.nix;  };
       # ── QEMU A/B system evaluation ─────────────────────────────────────────
       #
       # Uses the same sdimage.nix SD image builder as real hardware — the only
@@ -181,7 +180,6 @@
           }
         ];
       };
-      picoMiniB-vm      = mkSystem   { configuration = ./configurations/qemu-vm.nix;    };
       # Unified SD image: A/B squashfs layout when system.abRootfs.enable = true
       # (the default in configuration.nix), single ext4 partition otherwise.
       # The partition layout is determined entirely inside configurations/sdimage.nix
@@ -350,230 +348,6 @@ Verify MBR (partition table at byte 446, signature 55 aa at byte 510):
   exactly where the boot stops.
 EOF
       '';
-
-      # ── QEMU test disk (read-only ext4 image of the rootfs) ─────────────────
-      qemu-test-disk = hostPkgs.runCommand "luckfox-test.img" {
-        nativeBuildInputs = [ hostPkgs.e2fsprogs ];
-      } ''
-        truncate -s 512M $out
-        mkfs.ext4 \
-          -d ${picoMiniB-qemu.config.system.build.rootfs} \
-          -L rootfs \
-          -E lazy_itable_init=0,lazy_journal_init=0 \
-          $out
-      '';
-
-      # ── QEMU runner (read-only virtio-blk disk) ──────────────────────────────
-      #
-      # The rootfs is served as a raw ext4 image on a read-only virtio-blk
-      # device (/dev/vda).  No initramfs — the kernel mounts the disk directly.
-      # This is closer to real hardware (eMMC/SD read-only rootfs) than the old
-      # initramfs approach, and exercises the virtio-blk path explicitly.
-      qemu-test = hostPkgs.writeShellApplication {
-        name = "qemu-test-luckfox";
-
-        runtimeInputs = [ hostPkgs.qemu hostPkgs.python3 ];
-
-        text = ''
-          SSH_PORT=$(python3 -c \
-            "import socket; s=socket.socket(); s.bind((\"\",0)); \
-             print(s.getsockname()[1]); s.close()")
-
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  Luckfox Pico Mini B — QEMU virt (ARMv7 Cortex-A7)"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  Serial console below (Ctrl-A X to exit QEMU)"
-          echo "  SSH: ssh root@localhost -p ''${SSH_PORT}"
-          echo "  Rootfs: read-only virtio-blk (/dev/vda)"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-          exec qemu-system-arm \
-            -M virt \
-            -cpu cortex-a7 \
-            -smp 1 \
-            -m 64M \
-            -kernel ${qemuKernel}/zImage \
-            -append "${picoMiniB-qemu.config.boot.cmdline}" \
-            -drive "file=${qemu-test-disk},format=raw,if=virtio,readonly=on" \
-            -nographic \
-            -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
-            -device virtio-net-device,netdev=net0 \
-            -device virtio-rng-device
-        '';
-      };
-
-      # ── Importable QCOW2 disk image ─────────────────────────────────────────
-      #
-      # Builds an ext4 filesystem from the rootfs tree using mke2fs -d
-      # (no mount required — works inside the Nix sandbox) then converts
-      # to compressed QCOW2 for compact distribution.
-      qemu-vm-disk = hostPkgs.runCommand "luckfox-vm.qcow2" {
-        nativeBuildInputs = with hostPkgs; [ e2fsprogs qemu ];
-      } ''
-        echo "=== populating ext4 image from rootfs ==="
-        # 512 MiB is generous for this rootfs; adjust if you add large packages.
-        truncate -s 512M rootfs.img
-        mkfs.ext4 -L rootfs \
-          -d ${picoMiniB-vm.config.system.build.rootfs} \
-          rootfs.img
-
-        echo "=== converting to compressed QCOW2 ==="
-        qemu-img convert -f raw -O qcow2 -c rootfs.img $out
-        echo "=== done: $(du -sh $out | cut -f1) on disk ==="
-      '';
-
-      # ── Self-contained VM bundle ──────────────────────────────────────────────
-      #
-      # A directory containing:
-      #   luckfox.qcow2  — the root disk (writable copy required — see run.sh)
-      #   zImage         — the ARM kernel
-      #   run.sh         — portable launch script (copies disk on first run)
-      #
-      # Usage:
-      #   cp -r $(nix build .#qemu-vm-bundle --print-out-paths) ~/luckfox-vm
-      #   chmod -R u+w ~/luckfox-vm        # make writable
-      #   ~/luckfox-vm/run.sh
-      #
-      # Or just: nix run .#qemu-vm
-      qemu-vm-bundle = hostPkgs.runCommand "luckfox-vm-bundle" {} ''
-        mkdir -p $out
-        cp ${qemu-vm-disk}       $out/luckfox.qcow2
-        cp ${qemuKernel}/zImage  $out/zImage
-
-        cat > $out/run.sh << 'RUNEOF'
-#!/bin/sh
-# Luckfox Pico Mini B — QEMU VM launcher
-# Copy this whole directory somewhere writable before running.
-set -e
-DIR="$(cd "$(dirname "$0")" && pwd)"
-DISK="$DIR/luckfox.qcow2"
-KERNEL="$DIR/zImage"
-SSH_PORT="''${SSH_PORT:-2222}"
-
-if [ ! -w "$DISK" ]; then
-  echo "ERROR: $DISK is read-only." >&2
-  echo "Copy the bundle directory to a writable location first:" >&2
-  echo "  cp -rL <bundle-path> ~/luckfox-vm && chmod -R u+w ~/luckfox-vm" >&2
-  exit 1
-fi
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Luckfox Pico Mini B — QEMU virt (ARMv7 / 64 MB)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Serial console below  (Ctrl-A X to quit QEMU)"
-echo "  SSH: ssh root@localhost -p $SSH_PORT"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-exec qemu-system-arm \
-  -M virt \
-  -cpu cortex-a7 \
-  -smp 1 \
-  -m 64M \
-  -kernel "$KERNEL" \
-  -append "console=ttyAMA0 root=/dev/vda rw init=/sbin/init panic=1" \
-  -drive  "file=$DISK,format=qcow2,if=virtio" \
-  -nographic \
-  -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
-  -device virtio-net-device,netdev=net0 \
-  -device virtio-rng-device
-RUNEOF
-        chmod +x $out/run.sh
-      '';
-
-      # ── QEMU VM app (uses ephemeral overlay so Nix store disk stays pristine) ─
-      qemu-vm = hostPkgs.writeShellApplication {
-        name = "qemu-vm-luckfox";
-        runtimeInputs = with hostPkgs; [ qemu python3 ];
-        text = ''
-          SSH_PORT=$(python3 -c \
-            "import socket; s=socket.socket(); s.bind((\"\",0)); \
-             print(s.getsockname()[1]); s.close()")
-
-          # The Nix store disk is read-only; layer a writable QCOW2 overlay.
-          OVERLAY=$(mktemp /tmp/luckfox-vm.XXXXXX.qcow2)
-          qemu-img create -f qcow2 \
-            -b ${qemu-vm-disk} -F qcow2 "$OVERLAY" > /dev/null
-          cleanup() { rm -f "$OVERLAY"; }
-          trap cleanup EXIT
-
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  Luckfox Pico Mini B — QEMU VM (ARMv7 / 64 MB)"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  Serial console below  (Ctrl-A X to quit)"
-          echo "  SSH: ssh root@localhost -p $SSH_PORT"
-          echo "  Disk changes are ephemeral (overlay deleted on exit)"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-          exec qemu-system-arm \
-            -M virt \
-            -cpu cortex-a7 \
-            -smp 1 \
-            -m 64M \
-            -kernel ${qemuKernel}/zImage \
-            -append "console=ttyAMA0 root=/dev/vda rw init=/sbin/init panic=1" \
-            -drive  "file=$OVERLAY,format=qcow2,if=virtio" \
-            -nographic \
-            -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
-            -device virtio-net-device,netdev=net0 \
-            -device virtio-rng-device
-        '';
-      };
-
-      # ── QEMU runner (disk image + ephemeral QCOW2 overlay) ───────────────────
-      #
-      # Boots the rootfs.img as a virtio-blk device.  A temporary QCOW2 overlay
-      # is created on top of the (read-only) Nix store image so any writes made
-      # inside QEMU are captured in the overlay only.  The overlay is deleted
-      # automatically when QEMU exits, giving a clean slate every run.
-      #
-      # Usage:  nix run .#qemu-overlay
-      #         ssh root@localhost -p <printed port>
-      qemu-overlay = hostPkgs.writeShellApplication {
-        name = "qemu-overlay-luckfox";
-
-        runtimeInputs = [ hostPkgs.qemu hostPkgs.qemu-utils hostPkgs.python3 ];
-
-        text = ''
-          ROOTFS="${picoMiniB.config.system.build.firmware}/rootfs.img"
-
-          # Create a temporary QCOW2 overlay backed by the Nix-built rootfs.
-          # The overlay starts at ~200 KB and only grows with actual writes.
-          OVERLAY=$(mktemp /tmp/luckfox-overlay.XXXXXX.qcow2)
-          qemu-img create -f qcow2 -b "$ROOTFS" -F raw "$OVERLAY"
-
-          # Ensure the overlay is removed however the script exits.
-          cleanup() { rm -f "$OVERLAY"; echo "Overlay removed."; }
-          trap cleanup EXIT
-
-          SSH_PORT=$(python3 -c \
-            "import socket; s=socket.socket(); s.bind((\"\",0)); \
-             print(s.getsockname()[1]); s.close()")
-
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  Luckfox — QEMU virt, disk image + ephemeral overlay"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  Serial console below (Ctrl-A X to exit QEMU)"
-          echo "  SSH:     ssh root@localhost -p $SSH_PORT"
-          echo "  Overlay: $OVERLAY  (deleted on exit)"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo ""
-
-          # Do NOT use 'exec' here — the shell must stay alive so the
-          # EXIT trap fires after QEMU finishes and removes the overlay.
-          qemu-system-arm \
-            -M virt \
-            -cpu cortex-a7 \
-            -smp 1 \
-            -m 64M \
-            -kernel ${qemuKernel}/zImage \
-            -append "console=ttyAMA0 root=/dev/vda rw init=/sbin/init panic=1" \
-            -drive file="$OVERLAY",format=qcow2,if=virtio \
-            -nographic \
-            -netdev "user,id=net0,hostfwd=tcp::''${SSH_PORT}-:22" \
-            -device virtio-net-device,netdev=net0 \
-            -device virtio-rng-device
-        '';
-      };
 
       # ── QEMU A/B disk image ─────────────────────────────────────────────────
       #
@@ -776,14 +550,8 @@ RUNEOF
         # Kernel built from SDK source (zImage + DTBs + modules).
         # Inspect result/dtbs/ to find the correct DTB name for hardware/pico-mini-b.nix.
         luckfox-kernel    = import ./pkgs/luckfox-kernel.nix { inherit pkgs; };
-        sdImage           = picoMiniB.config.system.build.image;
 
-        # Full flashable SD card image — partition layout determined by
-        # system.abRootfs.enable (set in configuration.nix):
-        #
-        #   true  → 4-partition A/B squashfs layout (default)
-        #   false → single ext4 partition
-        #
+        # Full flashable SD card image — 4-partition A/B squashfs layout.
         # Flash:   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
         # Upgrade: nix build .#rootfsPartition
         #          ssh root@luckfox upgrade < result/rootfs.squashfs
@@ -791,22 +559,11 @@ RUNEOF
         rootfsPartition       = picoMiniB-sdimage.config.system.build.rootfsPartition;
         slotSelectInitramfs   = picoMiniB-sdimage.config.system.build.slotSelectInitramfs;
 
-        # QEMU test outputs — Linux hosts only.
-        # Building the ARM kernel requires a Linux build environment; Darwin
-        # hosts need a configured nix-darwin Linux builder to use these.
-        # On Darwin without a builder, omit them rather than failing the whole
-        # flake evaluation.
+        # QEMU A/B test — squashfs + overlayfs boot via U-Boot (-bios).
+        # Darwin hosts need a configured Linux builder to build the ARM kernel.
       } // lib.optionalAttrs (lib.hasSuffix "-linux" system) {
-        qemu-test-disk    = qemu-test-disk;
-        qemu-test         = qemu-test;
-        qemu-overlay      = qemu-overlay;
-        qemu-vm-disk      = qemu-vm-disk;
-        qemu-vm-bundle    = qemu-vm-bundle;
-        qemu-vm           = qemu-vm;
-
-        # A/B rootfs QEMU test — squashfs + overlayfs boot path in a VM.
         # nix run .#qemu-ab                     — launch the VM (TCG, works everywhere)
-        # nix run .#qemu-ab-kvm                 — KVM-accelerated (Linux + /dev/kvm only)
+        # nix run .#qemu-ab-kvm                 — KVM-accelerated (Linux ARM hosts only)
         # nix build .#qemu-ab-disk              — the raw A/B disk image
         # nix build .#qemu-ab-rootfs            — standalone squashfs for upgrade testing
         qemu-ab           = qemu-ab;
@@ -816,21 +573,6 @@ RUNEOF
       };
 
       apps = lib.optionalAttrs (lib.hasSuffix "-linux" system) {
-        qemu-test = {
-          type    = "app";
-          program = "${qemu-test}/bin/qemu-test-luckfox";
-          meta.description = "Run the Luckfox rootfs in QEMU (read-only virtio-blk disk)";
-        };
-        qemu-overlay = {
-          type    = "app";
-          program = "${qemu-overlay}/bin/qemu-overlay-luckfox";
-          meta.description = "Run the Luckfox rootfs in QEMU with an ephemeral QCOW2 overlay";
-        };
-        qemu-vm = {
-          type    = "app";
-          program = "${qemu-vm}/bin/qemu-vm-luckfox";
-          meta.description = "Run the Luckfox rootfs as a persistent QEMU VM";
-        };
         qemu-ab = {
           type    = "app";
           program = "${qemu-ab}/bin/qemu-ab-luckfox";

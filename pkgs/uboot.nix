@@ -69,19 +69,22 @@ pkgs.stdenv.mkDerivation {
 
   # ── postPatch: make CMD51 (SEND_SCR) failure non-fatal ──────────────────────
   #
-  # Root cause of CMD17 / CMD51 timeouts (confirmed experimentally):
-  #   RV1103 DRAM sits at physical 0x00000000–0x03FFFFFF (64 MB).  The original
-  #   BOOTCOMMAND used load addresses in the 0x4xxxxxxx range (e.g. 0x43000000)
-  #   which are outside DRAM.  The DW MSHC IDMAC issues a DMA write to the
-  #   unmapped AXI address → bus error → CMD17 timeout (-110 ETIMEDOUT).
-  #   Confirmed: `mmc read 0x02000000 …` succeeded; `mmc read 0x43000000 …` failed.
-  #   U-Boot's own DBADDR (0x02df1880) and relocation offset (0x03d75000) place
-  #   all internal allocations within the 64 MB window, confirming the layout.
+  # RV1103 DRAM sits at physical 0x00000000–0x03FFFFFF (64 MB).
+  # All load addresses use 0x00xxxxxx values within this range; the IDMAC DMA
+  # engine works correctly as long as the destination is inside DRAM.
   #
-  # The BOOTCOMMAND now uses 0x00300000 for boot.scr — well within DRAM.
-  # boot.scr uses 0x00800000/0x01E00000/0x02000000 for kernel/fdt/ramdisk.
+  # The original BOOTCOMMAND used 0x43000000 (outside DRAM), causing IDMAC
+  # AXI bus errors reported as CMD17 timeout (-110).  Fixed — do not add any
+  # 0x4xxxxxxx addresses back; always keep addresses below 0x04000000.
   #
-  # CMD51 (SEND_SCR) patch — belt-and-suspenders:
+  # FIFO mode (CONFIG_DW_MMC_USE_FIFO) was tried as a workaround but causes
+  # byte-swapping within each 32-bit word: dw_mmc's 32-bit readl() returns
+  # bytes in little-endian word order, but the FIFO stream is byte-sequential.
+  # The mkimage header survives (U-Boot uses be32_to_cpu() on header fields)
+  # but script/binary data comes out with every 4-byte chunk byte-reversed.
+  # Do not re-enable FIFO mode; IDMAC works correctly with valid DRAM addresses.
+  #
+  # CMD51 (SEND_SCR) non-fatal patch — belt-and-suspenders:
   #   mmc rescan reinitialises the card protocol.  During mmc_startup(), CMD51
   #   is the first data transfer.  On some boards it times out on the first
   #   attempt (the card clock may not be fully stable immediately after set_ios).
@@ -162,15 +165,6 @@ with open('drivers/mmc/mmc.c', 'w') as f:
 print("  CMD51 (SEND_SCR) failure in mmc_app_scr() is now non-fatal (default SCR used)")
 PYEOF
 
-    # Legacy attempt: also try to inject FIFO mode into dw_mmc.c if present
-    # (no-op if the chip uses SDHCI instead).
-    dwmmc="drivers/mmc/dw_mmc.c"
-    if [ -f "$dwmmc" ]; then
-      echo "=== postPatch: $dwmmc found; injecting CONFIG_DW_MMC_USE_FIFO ==="
-      sed -i '0,/#include/{s/#include/\n\/* force FIFO mode — belt-and-suspenders against IDMAC issues *\/\n#undef  CONFIG_DW_MMC_USE_FIFO\n#define CONFIG_DW_MMC_USE_FIFO\n\n#include/}' "$dwmmc"
-    else
-      echo "=== postPatch: $dwmmc not found (SDHCI driver likely) — mmc rescan fix is the primary path ==="
-    fi
   '';
 
   configurePhase = ''
