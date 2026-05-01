@@ -248,7 +248,15 @@ with lib;
       imageSize = mkOption {
         type        = types.int;
         default     = 256;
-        description = "Size of the generated disk image in MiB.";
+        description = ''
+          Size of the generated disk image in MiB.
+
+          Set to 0 when system.abRootfs.enable = true and
+          system.abRootfs.slotSize is set to a non-zero value: the image
+          size is then computed automatically as
+            2 MiB overhead + bootPartSize + 2 × slotSize + persistSize.
+          This makes the image exactly as large as needed with no wasted space.
+        '';
       };
 
       sdExpand = {
@@ -595,8 +603,10 @@ with lib;
           Non-zero — explicit: each slot is exactly this many MiB.  Useful
           when you want predictable slot sizes independent of the total image
           size, or when you are targeting a specific SD card capacity.
-          system.imageSize must be large enough to hold:
-            bootPartSize + 2 × slotSize + persistSize + 2 MiB overhead.
+          Combine with system.imageSize = 0 to make the image exactly as
+          large as needed:
+            image = 2 MiB overhead + bootPartSize + 2 × slotSize + persistSize.
+          Or set system.imageSize explicitly (must be large enough to fit).
         '';
       };
 

@@ -46,6 +46,23 @@ let
 
   # Sector at which partition 1 starts (2 MiB = 4096 × 512 B sectors).
   partStartSector = 4096;
+  partStartMiB    = 2;   # partStartSector × 512 / 1024 / 1024
+
+  # ── Effective image size ──────────────────────────────────────────────────
+  # system.imageSize = 0 means "derive from A/B partition sizes".
+  # Requires abRootfs.enable = true and slotSize != 0 (explicit), otherwise
+  # the slot size itself would depend on the image size — circular.
+  effectiveImageSize =
+    if config.system.imageSize != 0
+    then config.system.imageSize
+    else if abCfg.enable && abCfg.slotSize != 0
+    then partStartMiB + abCfg.bootPartSize + 2 * abCfg.slotSize + abCfg.persistSize
+    else throw ''
+      system.imageSize = 0 requires system.abRootfs.enable = true and
+      system.abRootfs.slotSize to be set to a non-zero value so the total
+      image size can be computed.  Either set system.imageSize explicitly,
+      or set system.abRootfs.slotSize.
+    '';
 
   # ── U-Boot boot script (A/B mode) ────────────────────────────────────────
   # Written to the ext4 boot partition (p1) as boot.scr (a compiled U-Boot
@@ -124,7 +141,7 @@ in
     ];
   } ''
     mkdir -p $out
-    IMAGE_MB=${toString config.system.imageSize}
+    IMAGE_MB=${toString effectiveImageSize}
     SECTOR=${toString partStartSector}
     IMAGE_BYTES=$(( IMAGE_MB * 1024 * 1024 ))
     TOTAL_SECTORS=$(( IMAGE_BYTES / 512 ))
@@ -152,7 +169,7 @@ in
     REQUIRED_SECTORS=$(( BOOT_SIZE_SECTORS + 2 * SLOT_SIZE_SECTORS + PERSIST_SIZE_SECTORS ))
     if [ "$REQUIRED_SECTORS" -gt "$AVAILABLE_SECTORS" ]; then
       echo "ERROR: explicit slot layout requires $((REQUIRED_SECTORS / 2048)) MiB but" >&2
-      echo "  only $(( AVAILABLE_SECTORS / 2048 )) MiB available (system.imageSize = ${toString config.system.imageSize} MiB)." >&2
+      echo "  only $(( AVAILABLE_SECTORS / 2048 )) MiB available (effective image size = ${toString effectiveImageSize} MiB)." >&2
       echo "  Needed: bootPartSize(${toString abCfg.bootPartSize}) + 2×slotSize(${toString abCfg.slotSize}) + persistSize(${toString abCfg.persistSize}) = $((REQUIRED_SECTORS / 2048)) MiB" >&2
       exit 1
     fi
