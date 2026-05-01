@@ -217,6 +217,16 @@ PYEOF
         sed -i 's|#define CONFIG_BOOTDELAY .*|#define CONFIG_BOOTDELAY 2|' "$header"
         echo "  patched CONFIG_BOOTDELAY in $header"
       fi
+      # Force single-block MMC reads (CMD17 instead of CMD18).
+      # On RV1103 the DM MMC driver's multi-block path calls mmc_init() when
+      # reads fail, which then hangs on CMD51 (SEND_SCR) — this prevents fatload
+      # from reading any file data.  Single-block reads (CMD17) work correctly.
+      # Setting MAX_BLK_COUNT=1 makes every read a single-block transfer.
+      echo "" >> "$header"
+      echo "/* Force single-block MMC reads — CMD18 fails on RV1103 DM MMC */" >> "$header"
+      echo "#undef  CONFIG_SYS_MMC_MAX_BLK_COUNT" >> "$header"
+      echo "#define CONFIG_SYS_MMC_MAX_BLK_COUNT 1" >> "$header"
+      echo "  added CONFIG_SYS_MMC_MAX_BLK_COUNT=1 to $header"
     done
 
     # Recalculate Kconfig dependencies after the above changes.
