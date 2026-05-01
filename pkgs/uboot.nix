@@ -156,13 +156,19 @@ pkgs.stdenv.mkDerivation {
     }
 
     enable_config CONFIG_DISTRO_DEFAULTS
-    # DISTRO_DEFAULTS pulls in CONFIG_BOOTCOMMAND="run distro_bootcmd", which
-    # scans each MMC slot for extlinux.conf / boot.scr in order.
-    # Restrict the scan to MMC only (no USB/PXE/DHCP delays on this board).
+    # Restrict the distro_bootcmd scan to MMC only (no USB/PXE/DHCP delays).
     set_config_str CONFIG_DISTRO_BOOT_TARGETS '"mmc"'
-    # Boot delay: 0 seconds so the board doesn't pause at the U-Boot prompt.
-    # Hit any key over serial to interrupt and get the => prompt.
-    set_config_str CONFIG_BOOTDELAY 0
+
+    # The Rockchip defconfig hardcodes CONFIG_BOOTCOMMAND="run rkboot" which
+    # invokes the proprietary FIT/Android boot sequence.  CONFIG_DISTRO_DEFAULTS
+    # wants to set BOOTCOMMAND="run distro_bootcmd" but loses to the existing
+    # value when olddefconfig runs.  Override it explicitly here so that after
+    # olddefconfig our value is preserved.
+    set_config_str CONFIG_BOOTCOMMAND '"run distro_bootcmd"'
+
+    # Boot delay: 2 seconds — enough time to interrupt over serial (any key at
+    # the "Hit key to stop autoboot" prompt).  Set to 0 for production.
+    set_config_str CONFIG_BOOTDELAY 2
 
     # Recalculate Kconfig dependencies after the above changes.
     make \
