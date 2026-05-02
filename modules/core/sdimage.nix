@@ -314,9 +314,9 @@ PYEOF
       PREBAKE_CPIO_SIZE=$(stat -c%s ${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz)
       PREBAKE_INITRD_START=$(( 0x2000040 ))
       PREBAKE_INITRD_END=$(( 0x2000040 + PREBAKE_CPIO_SIZE ))
-      fdtput -c -t u boot-staging/${config.device.name}.dtb \
+      fdtput -t u boot-staging/${config.device.name}.dtb \
         /chosen linux,initrd-start $PREBAKE_INITRD_START
-      fdtput -c -t u boot-staging/${config.device.name}.dtb \
+      fdtput -t u boot-staging/${config.device.name}.dtb \
         /chosen linux,initrd-end $PREBAKE_INITRD_END
       echo "DTB: /chosen: linux,initrd-start=$(printf '0x%08x' $PREBAKE_INITRD_START) linux,initrd-end=$(printf '0x%08x' $PREBAKE_INITRD_END)"
     ''}
