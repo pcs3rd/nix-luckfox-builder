@@ -296,23 +296,45 @@ PYEOF
       fdtput -t s boot-staging/${config.device.name}.dtb \
         /ethernet@ffa80000 status disabled 2>/dev/null || true
       echo "DTB: disabled /ethernet@ffa80000 (not wired on Mini A/B)"
+
+      # 3. Pre-bake initrd addresses into /chosen as u32 cells.
+      #    Rockchip SDK U-Boot 2017.09 "Fdt Ramdisk skip relocation" does NOT write
+      #    linux,initrd-start/end to /chosen at all — it skips the entire initrd
+      #    FDT-setup step.  Pre-populating at image-build time means the kernel finds
+      #    the initramfs exactly where we loaded it with no U-Boot cooperation needed.
+      #
+      #    initrd.img layout: 64-byte mkimage header at 0x2000000, cpio data at
+      #    0x2000040.
+      #      linux,initrd-start = 0x2000040  (first byte of cpio.gz data)
+      #      linux,initrd-end   = 0x2000040 + size(cpio.gz)
+      #
+      #    Nix escaping note: PREBAKE_* variables use bare $VAR (no braces) so Nix
+      #    does NOT interpolate them; they remain shell variables at build time.
+      #    ${config.system.build.slotSelectInitramfs} IS a Nix interpolation (intended).
+      PREBAKE_CPIO_SIZE=$(stat -c%s ${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz)
+      PREBAKE_INITRD_START=$(( 0x2000040 ))
+      PREBAKE_INITRD_END=$(( 0x2000040 + PREBAKE_CPIO_SIZE ))
+      fdtput --create -t u32 boot-staging/${config.device.name}.dtb \
+        /chosen linux,initrd-start $PREBAKE_INITRD_START
+      fdtput --create -t u32 boot-staging/${config.device.name}.dtb \
+        /chosen linux,initrd-end $PREBAKE_INITRD_END
+      echo "DTB: /chosen: linux,initrd-start=$(printf '0x%08x' $PREBAKE_INITRD_START) linux,initrd-end=$(printf '0x%08x' $PREBAKE_INITRD_END)"
     ''}
 
     # Slot-select initramfs handles squashfs mount + overlay setup.
     #
-    # Wrap in a legacy mkimage ramdisk header so the Rockchip SDK U-Boot
-    # 2017.09 "Fdt Ramdisk skip relocation" boot path writes correct
-    # linux,initrd-start / linux,initrd-end values into the FDT /chosen node.
+    # Wrap in a legacy mkimage ramdisk header and fatload to 0x2000000.
+    # The 64-byte mkimage header lands at 0x2000000; cpio.gz data starts at
+    # 0x2000040.  linux,initrd-start/end are pre-baked into the DTB /chosen
+    # node above (step 3) because Rockchip SDK U-Boot 2017.09 "Fdt Ramdisk
+    # skip relocation" does NOT write those FDT properties — it skips the
+    # entire initrd FDT-setup step.  The BOOTCOMMAND passes '-' (no initrd)
+    # to bootz so bootz never touches /chosen; our pre-baked values survive
+    # unmolested for the kernel.
     #
-    # That SDK path uses the mkimage header fields as follows:
-    #   linux,initrd-start  ← ih_load + sizeof(header)  = 0x02000040
-    #   linux,initrd-end    ← ih_ep   (entry-point field)
-    #
-    # ih_ep must therefore equal the physical end of the compressed cpio data:
-    #   ih_ep = 0x02000040 + size(cpio.gz)
-    #
-    # With the wrong ih_ep (= ih_load = 0x02000000, the old value), bootz
-    # wrote linux,initrd-end < linux,initrd-start which the kernel rejected.
+    # ih_ep is set to the physical end of the cpio.gz data (0x2000040 +
+    # size(cpio.gz)) to keep the header internally consistent, even though
+    # it is not used by the current boot path.
     #
     # initrd.img = 8.3-compatible filename (safe without LFN in U-Boot).
     CPIO_GZ=${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz
