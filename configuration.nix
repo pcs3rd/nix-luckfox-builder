@@ -81,9 +81,9 @@ in
   #
   system.abRootfs = {
     enable      = true;
-    slotSize    = 64;   # 64 MiB per slot, explicit
+    slotSize    = 256;   # 64 MiB per slot, explicit
     swapSize    = 64;    # MiB of disk swap in persist partition — disable with 0
-    persistSize = 128;   # MiB for overlayfs upper/work dirs (must be > 0)
+    persistSize = 512;   # MiB for overlayfs upper/work dirs (must be > 0)
   };
 
   # Total SD image size auto-calculated from abRootfs sizes:
