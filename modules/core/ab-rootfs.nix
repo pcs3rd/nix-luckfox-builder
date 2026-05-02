@@ -198,13 +198,20 @@ let
     # needed.  The kernel reads the squashfs superblock from the block device.
     if ! mount -t squashfs "$ROOT" /squash; then
       ATTEMPTED="$SLOT"
-      echo "slot-select: WARNING — slot $ATTEMPTED ($ROOT) failed; falling back to slot A" >&2
-      mount -t squashfs "$SLOT_A" /squash || {
+      # Fall back to the OTHER slot (not always A — if A is the corrupt one
+      # we must try B, not retry A).
+      if [ "$SLOT" = "a" ]; then
+        FB_SLOT=b; FB_ROOT="$SLOT_B"
+      else
+        FB_SLOT=a; FB_ROOT="$SLOT_A"
+      fi
+      echo "slot-select: WARNING — slot $ATTEMPTED ($ROOT) failed; falling back to slot $FB_SLOT" >&2
+      mount -t squashfs "$FB_ROOT" /squash || {
         echo "slot-select: FATAL — cannot mount any squashfs slot" >&2
         exec /bin/sh
       }
-      SLOT=a
-      FALLBACK_MSG="Boot failure: slot $(echo "$ATTEMPTED" | tr a-z A-Z) ($ROOT) failed to mount; fell back to slot A."
+      SLOT="$FB_SLOT"
+      FALLBACK_MSG="Boot failure: slot $(echo "$ATTEMPTED" | tr a-z A-Z) ($ROOT) failed to mount; fell back to slot $(echo "$FB_SLOT" | tr a-z A-Z)."
     fi
 
     # ── Mount persist partition for overlayfs upper/work dirs ───────────────
