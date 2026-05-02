@@ -321,6 +321,14 @@ pkgs.stdenv.mkDerivation {
     CONFIG_MMC_BLOCK=y
     CONFIG_MMC_DW=y
     CONFIG_MMC_DW_ROCKCHIP=y
+    # Partition table scanning — required for the kernel to see mmcblkNp1..p4.
+    # CONFIG_PARTITION_ADVANCED gates the per-type selectors; without it the
+    # kernel only scans MSDOS (MBR) partitions by default.  If PARTITION_ADVANCED
+    # is enabled in the vendor defconfig (common on Rockchip for GUID/Rockchip
+    # partition support) then CONFIG_MSDOS_PARTITION must be explicit or the
+    # kernel silently produces no partition devices from a valid MBR disk.
+    CONFIG_PARTITION_ADVANCED=y
+    CONFIG_MSDOS_PARTITION=y
 SIZECFG
 
     make \
