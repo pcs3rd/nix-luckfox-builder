@@ -375,6 +375,17 @@ pkgs.stdenv.mkDerivation {
     CONFIG_USB_LIBCOMPOSITE=y
     CONFIG_USB_CONFIGFS=y
     CONFIG_USB_CONFIGFS_SERIAL=y
+    # USB_CONFIGFS_SERIAL selects USB_F_ACM and USB_U_SERIAL, but those selects
+    # don't propagate when USB_CONFIGFS_SERIAL itself gets dropped by olddefconfig.
+    # Pin them explicitly so the ACM function type is registered in configfs and
+    # 'mkdir functions/acm.GS0' succeeds.
+    CONFIG_USB_U_SERIAL=y
+    CONFIG_USB_F_ACM=y
+    # USB_ROLE_SWITCH — lets the Inno USB2 PHY register a role-switch device in
+    # /sys/class/usb_role/.  Without it, the usb-mode service cannot force device
+    # mode at boot and the board must rely on VBUS detection when a cable is plugged
+    # in.  With it, device mode is active immediately at boot regardless of cable.
+    CONFIG_USB_ROLE_SWITCH=y
     # Swap subsystem — without CONFIG_SWAP=y the swapon(2) syscall returns
     # ENOSYS ("Function not implemented") and neither disk swapfiles nor
     # zram swap can be activated, regardless of mkswap succeeding.
