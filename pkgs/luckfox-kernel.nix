@@ -354,6 +354,19 @@ pkgs.stdenv.mkDerivation {
     # CONFIG_USB_LIBCOMPOSITE      — composite gadget support (multiple functions per device)
     # CONFIG_USB_CONFIGFS          — userspace-configurable gadget descriptors via configfs
     # CONFIG_USB_CONFIGFS_SERIAL   — CDC-ACM function (/dev/ttyACMx on host, /dev/ttyGS0 on target)
+    # Enable /proc/config.gz so the running kernel can be introspected.
+    CONFIG_IKCONFIG=y
+    CONFIG_IKCONFIG_PROC=y
+    # USB host core and support — DWC3 Kconfig in some vendor trees has
+    # "depends on USB" (not "USB || USB_GADGET"), so enabling host ensures
+    # DWC3 can compile even if the gadget-only path is broken.
+    CONFIG_USB_SUPPORT=y
+    CONFIG_USB=y
+    CONFIG_USB_ANNOUNCE_NEW_DEVICES=n
+    # EXTCON — required by PHY_ROCKCHIP_INNO_USB2 (via 'select EXTCON').
+    # Adding it explicitly ensures olddefconfig doesn't drop the PHY because
+    # EXTCON wasn't yet selected when it evaluated PHY_ROCKCHIP_INNO_USB2.
+    CONFIG_EXTCON=y
     CONFIG_USB_DWC3=y
     CONFIG_USB_DWC3_OF_SIMPLE=y
     CONFIG_PHY_ROCKCHIP_INNO_USB2=y
@@ -380,6 +393,14 @@ SIZECFG
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
       olddefconfig
+
+    # ── Diagnostic: show final USB/PHY/EXTCON config values ──────────────────
+    # These lines appear in the build log.  If any critical option shows as
+    # "# CONFIG_FOO is not set" instead of "CONFIG_FOO=y", olddefconfig
+    # stripped it due to an unmet dependency — that's the root cause to fix.
+    echo "=== USB / PHY / EXTCON config after olddefconfig ==="
+    grep -E "^(CONFIG_USB|CONFIG_PHY_ROCKCHIP|CONFIG_EXTCON|CONFIG_DWC|CONFIG_CONFIGFS|CONFIG_SWAP|CONFIG_ZRAM|# CONFIG_USB|# CONFIG_PHY_ROCKCHIP)" .config | sort || true
+    echo "=== end USB config ==="
   '';
 
   buildPhase = ''
