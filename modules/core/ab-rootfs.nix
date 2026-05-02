@@ -162,6 +162,20 @@ let
         ;;
     esac
 
+    # The kernel registers the whole disk (mmcblk1) before it finishes reading
+    # the partition table and registering the individual partitions (mmcblk1p1..p4).
+    # Wait until the root partition device node actually exists before mounting.
+    j=0
+    while [ $j -lt 10 ] && [ ! -b "$SLOT_A" ]; do
+      mdev -s 2>/dev/null || true
+      sleep 1
+      j=$(( j + 1 ))
+    done
+    if [ ! -b "$SLOT_A" ]; then
+      echo "slot-select: WARNING — $SLOT_A not yet visible; /proc/partitions:" >&2
+      cat /proc/partitions >&2
+    fi
+
     # Read single slot indicator byte from the reserved raw disk location.
     SLOT=$(dd if="$DISK" bs=1 skip=${toString cfg.slotOffset} count=1 2>/dev/null)
 
