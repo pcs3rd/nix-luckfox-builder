@@ -114,13 +114,24 @@ let
     # Wait for the first real block disk to appear in /proc/partitions.
     # Re-run mdev -s each iteration so partition device nodes are created as
     # the kernel finishes scanning.  Skip RAM disks, MTD flash, and loop devices;
-    # skip partition entries (names ending in a digit) to get only whole disks.
+    # skip partition entries to get only whole disks.
+    #
+    # Naming conventions:
+    #   SCSI/virtio:  sda (disk), sda1 (partition)  — disk does NOT end in digit
+    #   MMC:          mmcblk0 (disk), mmcblk0p1 (partition) — disk ENDS in digit!
+    #   NVMe:         nvme0n1 (disk), nvme0n1p1 (partition) — disk ends in digit
+    #
+    # The old "skip if name ends in digit" rule works for SCSI/virtio but
+    # incorrectly drops mmcblk0 and nvme0n1.  Explicitly accept the MMC/NVMe
+    # whole-disk patterns; fall back to the digit-suffix heuristic for others.
     i=0
     DISK=""
     while [ $i -lt 20 ] && [ -z "$DISK" ]; do
       mdev -s 2>/dev/null || true
       DISK=$(awk 'NR>2 { n=$NF
         if (n ~ /^(ram|loop|mtdblock)/) next
+        if (n ~ /^mmcblk[0-9]+$/) { print "/dev/" n; exit }
+        if (n ~ /^nvme[0-9]+n[0-9]+$/) { print "/dev/" n; exit }
         if (n ~ /[0-9]$/) next
         print "/dev/" n; exit
       }' /proc/partitions 2>/dev/null)
