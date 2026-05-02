@@ -9,16 +9,23 @@
 #   nix build .#packages.aarch64-darwin.sdImage-flashable
 #   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
 
-{ pkgs, ... }:
+{ pkgs, buildDate ? "unknown", ... }:
 
 let
   localPkgs = import ./pkgs { inherit pkgs; };
 in
 
 {
-  imports = [
-    ./hardware/pico-mini-b.nix
-  ];
+  # ── Board selection ─────────────────────────────────────────────────────────
+  # The luckfox-board module (modules/core/luckfox-board.nix) sets the kernel,
+  # DTB, U-Boot paths, hostname, and USB role-switch path automatically.
+  # Change model to "pico-mini-a" for the Mini A (no SPI flash).
+  luckfox = {
+    support = true;
+    model   = "pico-mini-a";   # "pico-mini-a" | "pico-mini-b"
+    # hostname is set automatically: pico-mini-a → luckfox-mini-a
+    #                                pico-mini-b → luckfox
+  };
 
   # ── Extra packages ──────────────────────────────────────────────────────────
   # Binaries from each package's bin/ are copied into /bin on the rootfs.
@@ -31,21 +38,20 @@ in
     # nrfnet is added automatically when services.nrfnet.enable = true
   ];
 
-  # ── Kernel modules ──────────────────────────────────────────────────────────
-  # Required for CONFIG_ZRAM=m and any other =m driver.
-  # Uncomment once you have verified the luckfox-kernel-modules build succeeds:
-  #   nix build .#packages.aarch64-darwin.pico-mini-b
-  # device.kernelModulesPath = "${localPkgs.luckfox-kernel-modules}/lib/modules";
-
   # ── System ──────────────────────────────────────────────────────────────────
 
   # USB OTG port mode — "host" | "device" | "otg" (auto/ID-pin, default)
+  # dr_mode is patched to "peripheral" in the DTB by luckfox-kernel.nix, so the
+  # DWC3 starts in device mode unconditionally without needing a role-switch.
+  # system.usb.mode is kept as "device" for documentation but the usb-mode
+  # service will exit cleanly (no /sys/class/usb_role/ needed).
   system.usb.mode = "device";
   system.usbGadget = {
     enable    = true;
     functions = [ "acm" ];
-    product   = "Ox64";
+    product   = "Luckfox";
   };
+
   # Compressed RAM swap — ~96 MB effective swap on a 64 MB board at near-zero latency.
   system.zram = {
     enable    = true;
@@ -60,19 +66,33 @@ in
     bootloaderPin = -1;   # -1 = double-tap reset (RP2040); set for BOOT pin (STM32/nRF)
   };
 
-  # ── Bootloader ──────────────────────────────────────────────────────────────
-  boot.uboot = {
-    enable  = true;
-    spl     = "${localPkgs.uboot}/SPL";
-    package = "${localPkgs.uboot}/u-boot.img";
+  # ── A/B rootfs (zero-downtime SSH upgrades) ─────────────────────────────────
+  # When enabled, the image uses squashfs slots + overlayfs for persistence:
+  #   p1 ext4 "boot"    — kernel + initramfs
+  #   p2 squashfs       — slot A rootfs (read-only, compressed)
+  #   p3 squashfs       — slot B rootfs (read-only, compressed)
+  #   p4 ext4 "persist" — overlay writable layer (survives reboots)
+  # /bin/upgrade and /bin/slot are added to the rootfs automatically.
+  #
+  # Build:   nix build .#sdImage-ab
+  # Flash:   dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress
+  # Upgrade: nix build .#rootfsPartition
+  #          ssh root@luckfox upgrade < result/rootfs.squashfs
+  #
+  system.abRootfs = {
+    enable      = true;
+    slotSize    = 256;   # 64 MiB per slot, explicit
+    swapSize    = 64;    # MiB of disk swap in persist partition — disable with 0
+    persistSize = 512;   # MiB for overlayfs upper/work dirs (must be > 0)
   };
 
-  rockchip.enable = true;
-
+  # Total SD image size auto-calculated from abRootfs sizes:
+  #   2 MiB gap + 64 MiB boot + 64 MiB slot-A + 64 MiB slot-B + 32 MiB persist = 226 MiB
+  system.imageSize = 0; # 0 to autocalc from system.abRootfs
   # ── Services ────────────────────────────────────────────────────────────────
 
-  services.getty.enable = true;    # serial console on ttyS0
-  services.ssh.enable   = true;   # dropbear SSH; set users.root.hashedPassword first
+  services.getty.enable = true;    # serial console on ttyFIQ0 (Rockchip FIQ debugger UART)
+  services.ssh.enable   = true;    # dropbear SSH; set users.root.hashedPassword first
 
   # mesh-bbs: minimal Meshtastic BBS + store-and-forward bot.
   # Commands via direct message: bbs list/read/post, snf send/list
@@ -94,7 +114,7 @@ in
   # Setting enable = true installs /bin/nrfnet but does NOT auto-start the daemon.
   # Run manually: nrfnet --primary --spi_device=/dev/spidev0.0 --channel=42
   services.nrfnet = {
-    enable    = false;
+    enable    = true;
     role      = "primary";         # or "secondary"
     spiDevice = "/dev/spidev0.0";
     channel   = 42;
@@ -127,14 +147,27 @@ in
     port   = 16622;
   };
 
+  # ── Login banner ────────────────────────────────────────────────────────────
+  # /etc/issue — shown by getty before the login prompt.
+  # \n = hostname, \l = tty, \r = kernel release.
+  system.banner = ''
+    Luckfox Pico Mini A — \n  (\l)
+    Kernel \r  |  Built ${buildDate}
+  '';
+
+  # /etc/motd — shown after successful login.
+  system.motd = ''
+    Type 'slot' to check the active A/B slot.
+    Type 'upgrade < image' to update the inactive slot.
+  '';
+
   # ── Networking ──────────────────────────────────────────────────────────────
-  networking = {
-    dhcp.enable = true;
-    hostname    = "luckfox";
-  };
+  # hostname is set automatically by luckfox-board based on the model.
+  # Override here if needed: networking.hostname = "my-device";
+  networking.dhcp.enable = true;
 
   # ── Users ───────────────────────────────────────────────────────────────────
   # Generate a new hash with:  openssl passwd -6 yourpassword
   # The default "!" locks the root account (no password login).
-  users.root.hashedPassword = "$6$vW4NFpymQUO5omMq$Z1vcrtaS7bawg02BETzqGTpy35wWgqPMBeFKua6KyETDPUlEVvEldJ8EiR931L1UXnLMlBb/PgGhbnPnVo1/81"; # password: 1234
+  users.root.hashedPassword = "$6$bk3p2NLeBAMNslm/$btSZ/xm8pD3QVuHQGXcrPIRBCGOydtsCK3XNKvrRtZuCEPY4jya60gaWJH6MgT/Q8LnCu750P6fIC1ETrltUh/"; # Test
 }

@@ -3,7 +3,8 @@
 {
   # ── Root filesystem directory ───────────────────────────────────────────────
   config.system.build.rootfs = pkgs.runCommand "rootfs" {} ''
-    mkdir -p $out/{bin,sbin,etc,proc,sys,dev,root,lib,var/log,mnt,newroot}
+    mkdir -p $out/{bin,sbin,etc,proc,sys,dev,root,lib,tmp,var/log,mnt,newroot}
+    chmod 1777 $out/tmp
 
     # ── Kernel modules ─────────────────────────────────────────────────────
     # Copy /lib/modules/<ver>/ so that modprobe can load kernel modules
@@ -247,7 +248,8 @@ EXPAND_EOF
             for f in "$entry"*; do
               [ -e "$f" ] || continue
               name=$(basename "$f")
-              if [ ! -e "$out/bin/$name" ] && [ ! -e "$out/sbin/$name" ]; then
+              if [ ! -e "$out/bin/$name" ] && [ ! -L "$out/bin/$name" ] && \
+                 [ ! -e "$out/sbin/$name" ] && [ ! -L "$out/sbin/$name" ]; then
                 cp -L "$f" "$out/$dirname/$name"
                 chmod +x "$out/$dirname/$name"
               fi
@@ -267,15 +269,26 @@ EXPAND_EOF
       done
     '') config.packages}
 
+    # ── /sbin/init-pseudofs — idempotent pseudo-filesystem mounts ──────────
+    # After switch_root from the A/B initramfs, /proc, /sys, and /dev are
+    # already mounted (the initramfs moved them with mount --move before
+    # exec switch_root).  A plain 'mount' would print "Resource busy" and
+    # clutter the boot log.  Guard each mount with mountpoint -q so it only
+    # runs when the filesystem isn't already there.
+    cat > $out/sbin/init-pseudofs << 'PSEUDO_EOF'
+#!/bin/sh
+mountpoint -q /dev  2>/dev/null || mount -t devtmpfs devtmpfs /dev
+mountpoint -q /proc 2>/dev/null || mount -t proc proc /proc
+mountpoint -q /sys  2>/dev/null || mount -t sysfs sysfs /sys
+exec /bin/busybox mdev -s
+PSEUDO_EOF
+    chmod +x $out/sbin/init-pseudofs
+
     # ── inittab ────────────────────────────────────────────────────────────
     cat > $out/etc/inittab << 'EOF'
-# Mount devtmpfs first — this populates /dev/null, /dev/console,
-# /dev/ttyAMA0, etc. before any other process tries to open them.
-::sysinit:/bin/mount -t devtmpfs devtmpfs /dev
-::sysinit:/bin/mount -t proc proc /proc
-::sysinit:/bin/mount -t sysfs sysfs /sys
-# Scan /sys and create any device nodes devtmpfs may have missed.
-::sysinit:/bin/busybox mdev -s
+# Mount pseudo-filesystems and populate /dev — idempotent so it's safe
+# whether we came up from the A/B initramfs (already mounted) or directly.
+::sysinit:/sbin/init-pseudofs
 ${lib.optionalString config.system.sdExpand.enable
   "::sysinit:/sbin/expand-rootfs"}
 ${lib.optionalString config.services.getty.enable
@@ -292,6 +305,16 @@ EOF
 
     # ── hostname ───────────────────────────────────────────────────────────
     echo "${config.networking.hostname}" > $out/etc/hostname
+
+    # ── Login banner (/etc/issue) — shown by getty before the login prompt ─
+    ${lib.optionalString (config.system.banner != null) ''
+      cp ${pkgs.writeText "issue" config.system.banner} $out/etc/issue
+    ''}
+
+    # ── Message of the day (/etc/motd) — shown by login after auth ─────────
+    ${lib.optionalString (config.system.motd != null) ''
+      cp ${pkgs.writeText "motd" config.system.motd} $out/etc/motd
+    ''}
 
     # ── user / password database ───────────────────────────────────────────
     # passwd: shadow-style (password field is 'x', real hash is in shadow)

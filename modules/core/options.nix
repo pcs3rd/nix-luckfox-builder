@@ -191,8 +191,8 @@ with lib;
         enable = mkEnableOption "getty";
         tty = mkOption {
           type        = types.str;
-          default     = "ttyS0";
-          description = "Serial console device. Use ttyS0 for real hardware, ttyAMA0 for QEMU virt.";
+          default     = "ttyFIQ0";
+          description = "Serial console device. Rockchip RV1103/RV1106 boards use ttyFIQ0 (FIQ debugger UART). Use ttyS0 for generic hardware, ttyAMA0 for QEMU virt.";
         };
         baud = mkOption {
           type        = types.int;
@@ -219,7 +219,7 @@ with lib;
     boot = {
       cmdline = mkOption {
         type        = types.str;
-        default     = "console=ttyS0 root=/dev/mmcblk0p1 rw rootfstype=ext4";
+        default     = "console=ttyFIQ0 root=/dev/mmcblk0p1 rw rootfstype=ext4";
         description = "Kernel command line passed by the bootloader.";
       };
 
@@ -248,7 +248,15 @@ with lib;
       imageSize = mkOption {
         type        = types.int;
         default     = 256;
-        description = "Size of the generated disk image in MiB.";
+        description = ''
+          Size of the generated disk image in MiB.
+
+          Set to 0 when system.abRootfs.enable = true and
+          system.abRootfs.slotSize is set to a non-zero value: the image
+          size is then computed automatically as
+            2 MiB overhead + bootPartSize + 2 × slotSize + persistSize.
+          This makes the image exactly as large as needed with no wasted space.
+        '';
       };
 
       sdExpand = {
@@ -330,6 +338,29 @@ with lib;
       '';
     };
 
+    system.banner = mkOption {
+      type        = types.nullOr types.lines;
+      default     = null;
+      description = ''
+        Pre-login banner written to /etc/issue.
+        Displayed by getty before the login prompt.
+        Supports busybox escape sequences:
+          \n — hostname    \l — tty line
+          \s — OS name     \r — kernel release
+        Set to null (default) to omit /etc/issue entirely.
+      '';
+    };
+
+    system.motd = mkOption {
+      type        = types.nullOr types.lines;
+      default     = null;
+      description = ''
+        Message of the day written to /etc/motd.
+        Displayed by login after successful authentication.
+        Set to null (default) to omit /etc/motd entirely.
+      '';
+    };
+
     users = {
       root = {
         hashedPassword = lib.mkOption {
@@ -359,6 +390,7 @@ with lib;
         default     = null;
         description = "Path to the device tree blob. Required for SD image builds.";
       };
+
       kernelModulesPath = mkOption {
         type        = types.nullOr types.path;
         default     = null;
@@ -495,14 +527,183 @@ with lib;
       };
     };
 
+    system.abRootfs = {
+      enable = mkEnableOption ''
+        A/B rootfs with squashfs + overlayfs for zero-downtime SSH upgrades.
+
+        Disk layout (4 partitions):
+          p1 — ext4 boot partition  (kernel, initramfs, boot.scr)
+          p2 — squashfs slot A rootfs  (read-only compressed image)
+          p3 — squashfs slot B rootfs  (read-only compressed image)
+          p4 — ext4 persist partition  (overlayfs upper/work dirs)
+
+        A single slot indicator byte at a raw disk offset (sector 1 by default)
+        selects the active slot.  A tiny initramfs reads it at boot, mounts the
+        active squashfs slot, layers the persist partition on top via overlayfs,
+        and switch_root's into the overlay.
+
+        /bin/upgrade streams a new squashfs image from stdin to the inactive slot,
+        flips the slot byte, and reboots.  /bin/slot shows or sets the active slot.
+
+        See modules/core/ab-rootfs.nix for the full design.
+      '';
+
+      slotOffset = mkOption {
+        type        = types.int;
+        default     = 512;
+        description = ''
+          Byte offset on the raw disk at which the single slot indicator byte
+          ('a' or 'b') is stored.  The default 512 is the first byte of sector 1 —
+          safely between the MBR (sector 0) and the first bootloader stage
+          (Rockchip SPL at sector 64).
+        '';
+      };
+
+      bootPartLabel = mkOption {
+        type        = types.str;
+        default     = "boot";
+        description = ''
+          ext4 filesystem label for the boot partition (partition 1).
+          Contains the kernel image, initramfs, boot.scr, and extlinux.conf.
+        '';
+      };
+
+      bootPartSize = mkOption {
+        type        = types.int;
+        default     = 64;
+        description = ''
+          Size of the boot partition (p1) in MiB.
+          64 MiB is generous for a kernel + initramfs + boot scripts.
+        '';
+      };
+
+      persistLabel = mkOption {
+        type        = types.str;
+        default     = "persist";
+        description = ''
+          ext4 filesystem label for the overlay persist partition (partition 4).
+          The initramfs mounts this partition and creates per-slot upper/work
+          directories for the overlayfs writable layer.  The label is also used
+          by /bin/upgrade and /bin/slot to locate the disk at runtime without
+          hardcoding device paths.
+        '';
+      };
+
+      slotSize = mkOption {
+        type        = types.int;
+        default     = 0;
+        description = ''
+          Size of each A/B rootfs slot partition (p2 and p3) in MiB.
+
+          0 (default) — auto: divide the remaining disk space equally between
+          the two slots after the boot and persist partitions are allocated.
+          Use this when you want the slots to fill whatever system.imageSize
+          provides.
+
+          Non-zero — explicit: each slot is exactly this many MiB.  Useful
+          when you want predictable slot sizes independent of the total image
+          size, or when you are targeting a specific SD card capacity.
+          Combine with system.imageSize = 0 to make the image exactly as
+          large as needed:
+            image = 2 MiB overhead + bootPartSize + 2 × slotSize + persistSize.
+          Or set system.imageSize explicitly (must be large enough to fit).
+        '';
+      };
+
+      persistSize = mkOption {
+        type        = types.int;
+        default     = 256;
+        description = ''
+          Size of the overlay persist partition (p4) in MiB.
+          This partition holds the overlayfs upper and work directories for
+          both slots (slot-a/upper, slot-a/work, slot-b/upper, slot-b/work).
+          Each slot's writable layer grows independently; upgrading to a new
+          slot starts with a fresh empty upper directory.
+        '';
+      };
+
+      squashfsCompression = mkOption {
+        type        = types.enum [ "lz4" "lzo" "gzip" "xz" "zstd" ];
+        default     = "lz4";
+        description = ''
+          Squashfs compression algorithm used when building rootfs slot images.
+            lz4  — fastest decompression; best boot-time performance (default).
+            lzo  — slightly better ratio than lz4, still very fast.
+            gzip — good ratio, moderate decompression speed.
+            zstd — best ratio with fast decompression; requires kernel ≥ 4.14.
+            xz   — highest ratio, slowest decompression; good for flash-constrained boards.
+        '';
+      };
+
+      extraKernelModules = mkOption {
+        type        = types.listOf types.path;
+        default     = [];
+        description = ''
+          List of kernel module (.ko) files or directories of .ko files to
+          embed in the slot-select initramfs and insmod before probing for
+          block devices.  Use this to supply drivers (e.g. virtio_blk, overlay,
+          squashfs) that are compiled as modules rather than built into the kernel.
+          Modules are loaded in alphabetical order with three retries to satisfy
+          simple dependency chains.
+        '';
+      };
+
+      swapSize = mkOption {
+        type        = types.int;
+        default     = 0;
+        description = ''
+          Size in MiB of a persistent swap file created in the persist partition.
+          0 (default) disables disk-backed swap entirely.
+
+          When non-zero, the slot-select initramfs creates /persist/swapfile on
+          first boot (using dd + mkswap), then activates it with swapon.  Because
+          the persist partition mount persists inside the kernel VFS through
+          switch_root, the swap stays active for the full lifetime of the system
+          without any userspace service.  No extra partition is needed.
+
+          Suggested sizes:
+            128 — light safety net alongside system.zram
+            256 — general-purpose fallback swap
+            512 — memory-intensive workloads
+
+          Tip: combine with system.zram (lz4 compressed RAM swap) for a two-tier
+          hierarchy: zram absorbs bursts cheaply; disk swap handles sustained
+          pressure.  With zram enabled, the disk swap will rarely be hit.
+
+          Note: disk swap on SD cards is slow and wears the card over time.
+          Prefer system.zram for latency-sensitive workloads.
+        '';
+      };
+    };
+
     system.build = {
-      rootfs    = mkOption { type = types.path; readOnly = true; };
-      initramfs = mkOption { type = types.path; readOnly = true; };
-      image     = mkOption { type = types.path; readOnly = true; };
-      sdImage   = mkOption { type = types.path; readOnly = true; };
-      uboot     = mkOption { type = types.path; readOnly = true; };
-      rockchip  = mkOption { type = types.path; readOnly = true; };
-      firmware  = mkOption { type = types.path; readOnly = true; };
+      rootfs             = mkOption { type = types.path; readOnly = true; };
+      initramfs          = mkOption { type = types.path; readOnly = true; };
+      image              = mkOption { type = types.path; readOnly = true; };
+      sdImage            = mkOption { type = types.path; readOnly = true; };
+      uboot              = mkOption { type = types.path; readOnly = true; };
+      rockchip           = mkOption { type = types.path; readOnly = true; };
+      firmware           = mkOption { type = types.path; readOnly = true; };
+      slotSelectInitramfs = mkOption {
+        type        = types.nullOr types.path;
+        readOnly    = true;
+        description = ''
+          The slot-select initramfs cpio.gz produced by ab-rootfs.nix.
+          Exposed here so sdimage.nix can embed it in the boot partition.
+          Null when system.abRootfs.enable = false.
+        '';
+      };
+      rootfsPartition = mkOption {
+        type        = types.nullOr types.path;
+        readOnly    = true;
+        description = ''
+          A standalone squashfs image of the rootfs, suitable for streaming
+          to /bin/upgrade over SSH:
+            nix build .#rootfsPartition
+            ssh root@device upgrade < result/rootfs.squashfs
+          Null when system.abRootfs.enable = false.
+        '';
+      };
     };
   };
 }

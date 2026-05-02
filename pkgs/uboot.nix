@@ -15,11 +15,11 @@
 #
 # ────────────────────────────────────────────────────────────────────────────
 
-{ pkgs }:
+{ pkgs, cmdline ? "rootwait" }:
 
 let
-  LUCKFOX_REV    = "438d5270a38c59a74f142dfa31ffbf51b096ce72";
-  LUCKFOX_SHA256 = "sha256-iPmQLKzgznBp3CJMvbbGrtLgd9P0jHgBrynqGnsAygI=";
+  LUCKFOX_REV    = "824b817f889c2cbff1d48fcdb18ab494a68f69d1";
+  LUCKFOX_SHA256 = "sha256-t0kiuP76j/D9i8l+o6JsYrDwUJjD/3cE3WBC+5TN2Lk=";
 
   # ── Compiler paths ─────────────────────────────────────────────────────────
   #
@@ -32,8 +32,12 @@ let
   # pkgs.stdenv.cc           — cross-compiler wrapper (target = armv7l musl)
   # pkgs.stdenv.cc.targetPrefix — "armv7l-unknown-linux-musleabihf-"
   # pkgs.buildPackages.stdenv.cc — native compiler wrapper (build machine)
+  #
+  # Use '/bin/cc' not '/bin/gcc': every Nixpkgs wrapper exposes 'cc', but
+  # clang wrappers have no 'gcc' and cross-GCC wrappers only expose the
+  # prefixed binary (armv7l-...-gcc), not bare 'gcc'.
   crossCompile = "${pkgs.stdenv.cc}/bin/${pkgs.stdenv.cc.targetPrefix}";
-  hostCC       = "${pkgs.buildPackages.stdenv.cc}/bin/gcc";
+  hostCC       = "${pkgs.buildPackages.stdenv.cc}/bin/cc";
 
 in
 
@@ -63,14 +67,129 @@ pkgs.stdenv.mkDerivation {
     patchelf    # needed to fix the ELF interpreter on rkbin proprietary tools
   ];
 
+  # ── postPatch: make CMD51 (SEND_SCR) failure non-fatal ──────────────────────
+  #
+  # RV1103 DRAM sits at physical 0x00000000–0x03FFFFFF (64 MB).
+  # All load addresses use 0x00xxxxxx values within this range; the IDMAC DMA
+  # engine works correctly as long as the destination is inside DRAM.
+  #
+  # The original BOOTCOMMAND used 0x43000000 (outside DRAM), causing IDMAC
+  # AXI bus errors reported as CMD17 timeout (-110).  Fixed — do not add any
+  # 0x4xxxxxxx addresses back; always keep addresses below 0x04000000.
+  #
+  # FIFO mode (CONFIG_DW_MMC_USE_FIFO) was tried as a workaround but causes
+  # byte-swapping within each 32-bit word: dw_mmc's 32-bit readl() returns
+  # bytes in little-endian word order, but the FIFO stream is byte-sequential.
+  # The mkimage header survives (U-Boot uses be32_to_cpu() on header fields)
+  # but script/binary data comes out with every 4-byte chunk byte-reversed.
+  # Do not re-enable FIFO mode; IDMAC works correctly with valid DRAM addresses.
+  #
+  # CMD51 (SEND_SCR) non-fatal patch — belt-and-suspenders:
+  #   mmc rescan reinitialises the card protocol.  During mmc_startup(), CMD51
+  #   is the first data transfer.  On some boards it times out on the first
+  #   attempt (the card clock may not be fully stable immediately after set_ios).
+  #   Making CMD51 non-fatal lets mmc_init() complete with a default SCR (1-bit,
+  #   SD 1.0) so subsequent CMD17 to valid DRAM addresses works correctly.
+  postPatch = ''
+    echo "=== postPatch: patching drivers/mmc/mmc.c — make CMD51 non-fatal ==="
+    python3 - << 'PYEOF'
+import sys
+
+with open('drivers/mmc/mmc.c', 'r') as f:
+    content = f.read()
+
+# Locate the mmc_app_scr function body (static int mmc_app_scr(...) { ... })
+func_sig = 'mmc_app_scr('
+idx = content.find(func_sig)
+if idx < 0:
+    print("  WARNING: mmc_app_scr not found in mmc.c — patch skipped")
+    sys.exit(0)
+
+brace = content.find('{', idx)
+if brace < 0:
+    print("  WARNING: function body brace not found — patch skipped")
+    sys.exit(0)
+
+# Walk braces to find the matching closing brace
+depth, pos, func_end = 0, brace, -1
+while pos < len(content):
+    if content[pos] == '{':  depth += 1
+    elif content[pos] == '}':
+        depth -= 1
+        if depth == 0:
+            func_end = pos; break
+    pos += 1
+
+if func_end < 0:
+    print("  WARNING: matching closing brace not found — patch skipped")
+    sys.exit(0)
+
+body = content[brace:func_end + 1]
+
+# The LAST 'return err;' in mmc_app_scr is after the CMD51 data read.
+# All earlier 'return err;' (after CMD13, CMD55) should remain fatal.
+last_ret = body.rfind('return err;')
+if last_ret < 0:
+    print("  WARNING: no 'return err;' found in mmc_app_scr body — patch skipped")
+    sys.exit(0)
+
+# Find the 'if (err)' that guards this return
+if_pos = body.rfind('if (err)', 0, last_ret)
+if if_pos < 0:
+    print("  WARNING: no 'if (err)' before last 'return err;' — patch skipped")
+    sys.exit(0)
+
+# Derive indentation from the 'if (err)' line
+line_start = body.rfind('\n', 0, if_pos) + 1
+indent = '''
+p = line_start
+while p < if_pos and body[p] in ' \t':
+    indent += body[p]; p += 1
+
+end_ret = last_ret + len('return err;')
+replacement = (
+    'if (err) {\n'
+    + indent + '\t/* CMD51 SEND_SCR timed out: use default SCR (1-bit, SD 1.0) */\n'
+    + indent + '\tscr_tmp[0] = 0;\n'
+    + indent + '\tscr_tmp[1] = 0;\n'
+    + indent + '\terr = 0;\n'
+    + indent + '}'
+)
+
+new_body = body[:if_pos] + replacement + body[end_ret:]
+new_content = content[:brace] + new_body + content[func_end + 1:]
+
+with open('drivers/mmc/mmc.c', 'w') as f:
+    f.write(new_content)
+
+print("  CMD51 (SEND_SCR) failure in mmc_app_scr() is now non-fatal (default SCR used)")
+PYEOF
+
+  '';
+
   configurePhase = ''
-    # The Luckfox-specific defconfig lives in the SDK overlay directory, not in
-    # u-boot/configs/.  The SDK Makefile copies it there before building; we
-    # do the same.
-    # Path: sourceRoot = sysdrv/source/uboot/u-boot
-    #       defconfig  = sysdrv/tools/board/uboot/luckfox_rv1106_uboot_defconfig
-    #       relative   = ../../../tools/board/uboot/luckfox_rv1106_uboot_defconfig
-    cp ../../../tools/board/uboot/luckfox_rv1106_uboot_defconfig configs/
+    # The Luckfox-specific defconfig may live in the SDK overlay directory or
+    # already be present in u-boot/configs/ depending on the SDK revision.
+    #
+    # SDK revisions where it lives in the overlay:
+    #   sysdrv/tools/board/uboot/luckfox_rv1106_uboot_defconfig
+    #   (relative from sourceRoot: ../../../tools/board/uboot/...)
+    #
+    # Newer revisions ship it directly in u-boot/configs/ — no copy needed.
+    echo "=== searching for luckfox_rv1106_uboot_defconfig ==="
+    if [ -f ../../../tools/board/uboot/luckfox_rv1106_uboot_defconfig ]; then
+      echo "Found in SDK overlay — copying to configs/"
+      cp ../../../tools/board/uboot/luckfox_rv1106_uboot_defconfig configs/
+    elif [ -f configs/luckfox_rv1106_uboot_defconfig ]; then
+      echo "Already in configs/ — no copy needed"
+    else
+      echo "=== Available defconfigs ==="
+      ls configs/ | grep -i 'luckfox\|rv110[36]' || true
+      echo "=== SDK overlay board dir (if present) ==="
+      ls ../../../tools/board/ 2>/dev/null || true
+      echo "ERROR: luckfox_rv1106_uboot_defconfig not found in SDK overlay or u-boot/configs/"
+      exit 1
+    fi
 
     make \
       ARCH=arm \
@@ -110,6 +229,174 @@ pkgs.stdenv.mkDerivation {
     # EFI partition scanning is only needed for EFI boot paths.
     disable_config CONFIG_SPL_EFI_PARTITION
 
+    # ── Enable distro_bootcmd ─────────────────────────────────────────────────
+    # The Luckfox SDK's default U-Boot uses Rockchip's proprietary boot path
+    # which looks for GPT partitions named "boot"/"misc" and Android FIT images.
+    # Our image uses a standard DOS MBR with an ext4 boot partition and boot.scr.
+    #
+    # CONFIG_DISTRO_DEFAULTS enables distro_bootcmd, which scans MMC/USB/... for
+    # boot.scr (and extlinux.conf) — exactly what we need.
+    #
+    # Also set the default boot device to mmc 1 (SD card on RV1103):
+    #   mmc@ffa90000 = slot 0 (no physical card on Mini A/B)
+    #   mmc@ffaa0000 = slot 1 (SD card — always slot 1)
+    enable_config() {
+      if grep -q "^# $1 is not set" .config; then
+        sed -i "s/^# $1 is not set/$1=y/" .config
+      elif ! grep -q "^$1=" .config; then
+        echo "$1=y" >> .config
+      fi
+    }
+    set_config_str() {
+      if grep -q "^$1=" .config; then
+        sed -i "s|^$1=.*|$1=$2|" .config
+      else
+        echo "$1=$2" >> .config
+      fi
+    }
+
+    # CONFIG_DISTRO_DEFAULTS is not a recognized Kconfig symbol in this SDK's
+    # U-Boot 2017.09 — it gets silently stripped by olddefconfig, so
+    # distro_bootcmd is never defined.  Instead, BOOTCOMMAND directly loads
+    # zImage, board.dtb, and the slot-select initramfs from the FAT boot
+    # partition (mmc 1:1) and calls bootz to start the kernel.
+    #
+    # The 'source' command was tried (loading a mkimage-wrapped boot.scr) but
+    # the Luckfox SDK's U-Boot 2017.09 source command executes garbage from
+    # the script image — a bug in the SDK's patched cmd/source.c.  BOOTCOMMAND
+    # is therefore written to perform the full load sequence inline without
+    # boot.scr.  boot.scr is still compiled and placed on the FAT partition for
+    # manual debugging (interrupt U-Boot, then load and examine it by hand).
+    #
+    # RV1103 DRAM layout: 64 MB at physical 0x00000000–0x03FFFFFF.
+    # All 0x4xxxxxxx addresses are OUTSIDE DRAM and cause IDMAC AXI bus errors
+    # (reported as CMD17 timeout -110).  Use low addresses within DRAM:
+    #   0x00800000 — kernel_addr_r    (8 MB mark — above U-Boot/SPL area)
+    #   0x01E00000 — fdt_addr_r       (30 MB mark — DTB is only a few KB)
+    #   0x02000000 — ramdisk_addr_r   (32 MB mark — initramfs)
+    #
+    # Load order matters: the last fatload sets 'filesize'.  Load the initramfs
+    # last so the fatload sets filesize to the initramfs size (not needed now that
+    # we use a legacy mkimage ramdisk; kept in case of fallback testing).
+    #
+    # board.dtb is the fixed filename in the FAT boot partition.  sdimage.nix
+    # copies the board-specific DTB to this name so BOOTCOMMAND can reference
+    # a stable filename regardless of the device.name value.
+    #
+    # CONFIG_BOOTARGS is set from the cmdline parameter passed at build time
+    # (the NixOS boot.cmdline module option).  U-Boot initialises the 'bootargs'
+    # env variable from CONFIG_BOOTARGS before BOOTCOMMAND runs.
+    #
+    # 'source' is still enabled so it is available for manual debugging at
+    # the U-Boot prompt.
+    enable_config CONFIG_CMD_SOURCE
+
+    # ── FDT manipulation and arithmetic ──────────────────────────────────────
+    # CONFIG_CMD_FDT enables 'fdt addr' and 'fdt chosen'.
+    # We use 'fdt addr 0x1E00000' to point U-Boot at the loaded DTB, then
+    # 'fdt chosen <start> <end>' to write linux,initrd-start and
+    # linux,initrd-end directly into the FDT's /chosen node.
+    #
+    # This bypasses the Rockchip SDK U-Boot 2017.09 "Fdt Ramdisk skip
+    # relocation" patch, which prevents bootz from ever calling fdt_initrd().
+    # With 'fdt chosen' the properties are in the FDT before bootz runs;
+    # bootz is called with '-' (no ramdisk arg) so it never overwrites them.
+    #
+    # CONFIG_CMD_SETEXPR enables 'setexpr re <a> + <b>' — used to compute
+    # the end address of the ramdisk (0x2000000 + filesize, where filesize
+    # is in hex and is set by the preceding fatload command).
+    enable_config CONFIG_CMD_FDT
+    enable_config CONFIG_OF_LIBFDT
+    enable_config CONFIG_CMD_SETEXPR
+
+    # ── MMC multi-block read workaround ───────────────────────────────────────
+    # On this board the MMC driver's multi-block path (CMD18) fails with
+    # "Re-init mmc_read_blocks error" when called from the command-line fatload
+    # code path.  Single-block reads (CMD17) succeed (FAT directory / metadata
+    # reads work; only file data transfers fail).  Force single-block I/O by
+    # setting the maximum transfer size to one block (512 B).
+    # This is slower but correct; file loads will work even if large reads fail.
+    disable_config CONFIG_MMC_IO_VOLTAGE
+    disable_config CONFIG_MMC_UHS_SUPPORT
+    disable_config CONFIG_MMC_HS400_SUPPORT
+    disable_config CONFIG_MMC_HS200_SUPPORT
+
+    # Use Python to write BOOTCOMMAND and BOOTARGS to .config.  Both values
+    # contain embedded double quotes which break sed inside double-quoted shell
+    # expressions.  BOOTCOMMAND explanation:
+    #   mmc dev 1          — sets curr_device=1 so 'mmc rescan' targets the SD.
+    #   mmc rescan         — clears has_init, calls mmc_init() to recalibrate
+    #                        the MMC clock divider after U-Boot relocation.
+    #   fatload x2         — loads zImage and board.dtb into DRAM-safe addresses.
+    #   fdt addr 0x1E00000 — points the FDT subsystem at the loaded DTB so that
+    #                        subsequent fdt commands target the right blob.
+    #   fdt resize 0x1000  — expands the FDT in-place by 4096 bytes so that
+    #                        bootz's setbootargs write has room to add properties.
+    #                        The kernel DTB has no free space past its last
+    #                        property; without resize the write fails with
+    #                        FDT_ERR_NOSPACE.  0x1E00000..0x2000000 is 2 MiB of
+    #                        DRAM headroom so growing in-place is safe.
+    #   fatload initrd.img — loads the legacy mkimage ramdisk (8.3 filename).
+    #                        The mkimage header's ih_ep field is set at image-
+    #                        build time to the correct linux,initrd-end address
+    #                        (0x2000040 + cpio_gz_size) by sdimage.nix.
+    #   bootz 0x800000 - 0x1E00000
+    #                      — '-' means "let bootz handle the ramdisk detection".
+    #                        The Rockchip SDK U-Boot 2017.09 "Fdt Ramdisk skip
+    #                        relocation" path detects the legacy image at
+    #                        0x2000000, reads ih_ep as linux,initrd-end, writes
+    #                        /chosen/linux,initrd-start = 0x2000040 (ih_load+64)
+    #                        and /chosen/linux,initrd-end = ih_ep, then skips
+    #                        the physical relocation.  With ih_ep set correctly
+    #                        the kernel receives the right initrd address range.
+    python3 - << 'PYEOF'
+import re, sys
+bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x800000 zImage; fatload mmc 1:1 0x1E00000 board.dtb; fdt addr 0x1E00000; fdt resize 0x1000; fatload mmc 1:1 0x2000000 initrd.img; bootz 0x800000 - 0x1E00000"'
+bootargs = 'CONFIG_BOOTARGS="${cmdline}"'
+with open('.config') as f:
+    content = f.read()
+for key, val in [('CONFIG_BOOTCOMMAND', bootcmd), ('CONFIG_BOOTARGS', bootargs)]:
+    if re.search(r'^' + key + r'=', content, re.MULTILINE):
+        content = re.sub(r'^' + key + r'=.*', val, content, flags=re.MULTILINE)
+    else:
+        content += val + '\n'
+with open('.config', 'w') as f:
+    f.write(content)
+print('  set ' + bootcmd)
+print('  set ' + bootargs)
+PYEOF
+
+    # Boot delay: 2 seconds — enough time to interrupt over serial (any key at
+    # the "Hit key to stop autoboot" prompt).  Set to 0 for production.
+    set_config_str CONFIG_BOOTDELAY 2
+
+    # ── Patch C board config headers ─────────────────────────────────────────
+    # U-Boot 2017.09 has incomplete Kconfig migration: many Rockchip boards
+    # still #define CONFIG_BOOTCOMMAND and CONFIG_BOOTDELAY in include/configs/
+    # C headers.  A C-header #define wins over a .config Kconfig value, so
+    # the Kconfig changes above would have no effect if headers also define them.
+    # Find and patch any such definitions to ensure our values take effect.
+    for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY\|CONFIG_BOOTARGS" include/configs/ 2>/dev/null); do
+      if grep -q '#define CONFIG_BOOTCOMMAND' "$header"; then
+        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x800000 zImage; fatload mmc 1:1 0x1E00000 board.dtb; fdt addr 0x1E00000; fdt resize 0x1000; fatload mmc 1:1 0x2000000 initrd.img; bootz 0x800000 - 0x1E00000"|' "$header"
+        echo "  patched CONFIG_BOOTCOMMAND in $header"
+      fi
+      if grep -q '#define CONFIG_BOOTDELAY' "$header"; then
+        sed -i 's|#define CONFIG_BOOTDELAY .*|#define CONFIG_BOOTDELAY 2|' "$header"
+        echo "  patched CONFIG_BOOTDELAY in $header"
+      fi
+      if grep -q '#define CONFIG_BOOTARGS' "$header"; then
+        sed -i 's|#define CONFIG_BOOTARGS .*|#define CONFIG_BOOTARGS "${cmdline}"|' "$header"
+        echo "  patched CONFIG_BOOTARGS in $header"
+      fi
+      # Belt-and-suspenders: cap block count at 1 to prevent CMD18 multi-block
+      # transfers.
+      echo "" >> "$header"
+      echo "#undef  CONFIG_SYS_MMC_MAX_BLK_COUNT" >> "$header"
+      echo "#define CONFIG_SYS_MMC_MAX_BLK_COUNT 1" >> "$header"
+      echo "  added CONFIG_SYS_MMC_MAX_BLK_COUNT=1 to $header"
+    done
+
     # Recalculate Kconfig dependencies after the above changes.
     make \
       ARCH=arm \
@@ -136,44 +423,117 @@ pkgs.stdenv.mkDerivation {
     # ── Diagnostics ───────────────────────────────────────────────────────────
     echo "=== U-Boot build artifacts ==="
     find . -maxdepth 3 \
-      \( -name "*.img" -o -name "*.bin" -o -name "SPL" -o -name "uboot.img" \) \
+      \( -name "*.img" -o -name "*.bin" -o -name "SPL" -o -name "idbloader.img" \) \
       -not -path "*/arch/*" -not -path "*/board/*" | sort
 
-    # ── SPL / idbloader ───────────────────────────────────────────────────────
-    # mkimage -T rksd rejects spl/u-boot-spl.bin because the rv1126 SRAM limit
-    # is 0xf000 (60 KB) but the built SPL is ~166 KB.  The SDK make.sh uses
-    # rkbin/tools/loaderimage which handles the two-stage load: the DDR init
-    # blob runs from SRAM, then the SPL is loaded into DDR and executed.
-    # loaderimage is an x86_64 ELF binary in the fetched source tree.
-    if [ -f SPL ]; then
-      cp SPL $out/SPL
-    else
-      # loaderimage is a proprietary x86_64 ELF in the rkbin tree.  It has a
-      # hardcoded /lib64/ld-linux-x86-64.so.2 interpreter that doesn't exist
-      # in the Nix build sandbox.  Patch it to use the actual Nix store linker.
-      # The Nix store is read-only; copy loaderimage to the build dir before patching.
-      cp ../rkbin/tools/loaderimage ./loaderimage
-      chmod 755 ./loaderimage   # cp preserves the store's r-x bits; patchelf needs w
-      # Extract the ELF interpreter from a known-working binary (patchelf itself)
-      # using its Nix store path directly — 'which' is not available in the sandbox.
-      interp=$(patchelf --print-interpreter "${pkgs.buildPackages.patchelf}/bin/patchelf")
-      patchelf --set-interpreter "$interp" ./loaderimage
+    # ── idbloader / SPL (SD card / SPI boot format) ───────────────────────────
+    #
+    # CRITICAL FORMAT DISTINCTION:
+    #   idbloader format  = what the Rockchip boot ROM reads from SD card sector 64
+    #                       (or from SPI NOR at offset 0x8000).  Written to $out/SPL.
+    #   LOADER format     = what `rkdeveloptool db` uploads over USB.
+    #                       Different binary layout — NEVER use for SD/SPI boot.
+    #
+    # loaderimage --pack --uboot produces LOADER format (USB download only).
+    # For SD/SPI boot we need idbloader format, built with mkimage -T rksd.
+    #
+    # The idbloader bundles two blobs end-to-end:
+    #   1. DDR init blob (runs from on-chip SRAM, initialises DRAM)
+    #   2. SPL binary    (loaded into DRAM by DDR init, chains to U-Boot proper)
+    #
+    IDBLOCK=""
 
-      echo "=== loaderimage usage ==="
-      ./loaderimage --help 2>&1 || true
-
-      echo "=== packing SPL ==="
-      # loaderimage creates a Rockchip miniloader image where the DDR init code
-      # runs from SRAM then loads the SPL into DDR.  0x400000 is the DDR
-      # load/run address for the RV1106 SPL (matches CONFIG_SPL_TEXT_BASE).
-      ./loaderimage --pack --uboot spl/u-boot-spl.bin $out/SPL 0x400000
+    # Strategy 1 — some Rockchip defconfigs emit idbloader.img during make.
+    if [ -f idbloader.img ]; then
+      echo "Strategy 1: using build-generated idbloader.img"
+      IDBLOCK="idbloader.img"
     fi
+
+    # Strategy 2 — SDK pre-built idblock.img from project/image/.
+    # These are identical to the Luckfox Ubuntu demo image binaries and are
+    # verified to boot on real RV1103 hardware.  Preferred over mkimage because
+    # the chip name mapping in this SDK's mkimage may not include rv1106.
+    # sourceRoot = source/sysdrv/source/uboot/u-boot; ../../../../ = source/
+    if [ -z "$IDBLOCK" ]; then
+      echo "Strategy 2: searching SDK project/image/ for pre-built idblock.img..."
+      for d in ../../../../project/image/*/; do
+        if [ -f "$d/idblock.img" ]; then
+          IDBLOCK="$d/idblock.img"
+          echo "  Found: $d/idblock.img"
+          break
+        fi
+      done
+    fi
+
+    # Strategy 3 — build idbloader from DDR blob + SPL using tools/mkimage -T rksd.
+    # RV1103/RV1106 is the same silicon as RV1126; try chip names from the SDK's
+    # supported list in order.  mkimage exits non-zero on unsupported names.
+    if [ -z "$IDBLOCK" ] && [ -f tools/mkimage ] && [ -f rv1106_ddr.bin ] && [ -f spl/u-boot-spl.bin ]; then
+      echo "Strategy 3: building idbloader with mkimage -T rksd..."
+      for chipname in rv1126 rv1108 rk3308; do
+        echo "  Trying -n $chipname ..."
+        if ./tools/mkimage -n "$chipname" -T rksd \
+            -d ./rv1106_ddr.bin:spl/u-boot-spl.bin \
+            /tmp/idbloader-candidate.img 2>/dev/null; then
+          IDBLOCK="/tmp/idbloader-candidate.img"
+          echo "  Success with -n $chipname"
+          break
+        fi
+      done
+    fi
+
+    if [ -z "$IDBLOCK" ]; then
+      echo "ERROR: Cannot produce an idbloader by any strategy:" >&2
+      echo "  1. No idbloader.img emitted by U-Boot build" >&2
+      echo "  2. No idblock.img under ../../../../project/image/*/" >&2
+      echo "     (dirs present: $(ls ../../../../project/image/ 2>/dev/null | head -5))" >&2
+      echo "  3. mkimage -T rksd failed for all tried chip names (rv1126 rv1108 rk3308)" >&2
+      echo "" >&2
+      echo "Build artifacts present:" >&2
+      find . -maxdepth 3 \( -name "*.bin" -o -name "*.img" \) 2>/dev/null | head -30 >&2
+      exit 1
+    fi
+
+    cp "$IDBLOCK" $out/SPL
+
+    # idblock.img is the conventional SDK name for the idbloader.
+    # Provide it as an alias so flash scripts can reference either name.
+    ln -s SPL $out/idblock.img
 
     # ── Main U-Boot binary ────────────────────────────────────────────────────
     if [ -f u-boot.img ]; then
       cp u-boot.img $out/u-boot.img
     else
-      cp u-boot.bin $out/u-boot.bin
+      cp u-boot.bin $out/u-boot.img
+    fi
+
+    # ── USB download loader (LOADER format for `rkdeveloptool db`) ────────────
+    #
+    # This is LOADER format — the binary rkdeveloptool db uploads over USB to
+    # initialise DRAM and present the USB flash interface.  It is NOT written
+    # to storage; it only lives in DRAM for the duration of the flash session.
+    #
+    # Try SDK's pre-built download.bin first (same binary in Ubuntu demo image),
+    # then fall back to generating one with loaderimage (which correctly produces
+    # LOADER format, despite that being wrong for SD boot).
+    FOUND_DL=""
+    for d in ../../../../project/image/*/; do
+      if [ -f "$d/download.bin" ]; then
+        FOUND_DL="$d/download.bin"
+        break
+      fi
+    done
+
+    if [ -n "$FOUND_DL" ]; then
+      echo "USB download loader: using pre-built $FOUND_DL"
+      cp "$FOUND_DL" $out/download.bin
+    else
+      echo "USB download loader: generating with loaderimage (LOADER format)..."
+      cp ../rkbin/tools/loaderimage ./loaderimage
+      chmod 755 ./loaderimage
+      interp=$(patchelf --print-interpreter "${pkgs.buildPackages.patchelf}/bin/patchelf")
+      patchelf --set-interpreter "$interp" ./loaderimage
+      ./loaderimage --pack --uboot spl/u-boot-spl.bin $out/download.bin 0x400000
     fi
   '';
 

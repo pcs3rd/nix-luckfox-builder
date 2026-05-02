@@ -58,8 +58,31 @@ in
         script = ''
           GADGET=/sys/kernel/config/usb_gadget/g0
 
-          # Mount configfs — idempotent, safe to repeat.
-          mount -t configfs none /sys/kernel/config 2>/dev/null || true
+          # ── Fast path: legacy g_serial gadget (CONFIG_USB_G_SERIAL=y) ────────
+          # When the kernel is built with USB_G_SERIAL=y, the CDC-ACM gadget is
+          # created automatically at boot — /dev/ttyGS0 appears as soon as the
+          # DWC3 UDC probes.  No configfs setup is needed; the usb-console
+          # respawn service takes care of the getty.
+          if [ -e /dev/ttyGS0 ]; then
+            echo "usb-gadget: legacy g_serial gadget detected (/dev/ttyGS0 present) — skipping configfs setup"
+            exit 0
+          fi
+
+          # ── Configfs path (CONFIG_USB_CONFIGFS=y) ────────────────────────────
+          # Create the mount point if it doesn't exist yet (the kernel makes
+          # /sys/kernel/config available in sysfs when CONFIG_CONFIGFS_FS=y, but
+          # we need the directory to exist before we can mount over it).
+          mkdir -p /sys/kernel/config 2>/dev/null || true
+
+          # Mount configfs — show the error if it fails so we can diagnose it.
+          if ! mountpoint -q /sys/kernel/config 2>/dev/null; then
+            if mount -t configfs none /sys/kernel/config 2>/tmp/configfs-mount-err; then
+              echo "usb-gadget: configfs mounted at /sys/kernel/config"
+            else
+              echo "usb-gadget: WARNING — configfs mount failed: $(cat /tmp/configfs-mount-err)" >&2
+              echo "usb-gadget: Is CONFIG_CONFIGFS_FS=y in the kernel?" >&2
+            fi
+          fi
 
           # Tear down any leftover gadget from a previous boot so we start clean.
           if [ -d "$GADGET" ]; then
@@ -69,7 +92,16 @@ in
             done
           fi
 
-          mkdir -p "$GADGET"
+          mkdir -p "$GADGET" 2>/tmp/gadget-mkdir-err || {
+            echo "usb-gadget: ERROR — cannot create $GADGET: $(cat /tmp/gadget-mkdir-err)" >&2
+            echo "usb-gadget: Is CONFIG_USB_CONFIGFS=y in the kernel?" >&2
+            # Check if legacy /dev/ttyGS0 appeared in the meantime
+            if [ -e /dev/ttyGS0 ]; then
+              echo "usb-gadget: /dev/ttyGS0 now exists — legacy gadget came up, exiting ok"
+              exit 0
+            fi
+            exit 1
+          }
 
           # ── USB device descriptor ─────────────────────────────────────────
           printf '${cfg.idVendor}\n'  > "$GADGET/idVendor"
@@ -148,7 +180,7 @@ in
           # Poll until it appears — the usb-gadget sysinit runs before us
           # but may still be in progress when this service starts.
           until [ -e /dev/ttyGS0 ]; do sleep 1; done
-          exec /sbin/getty -L ttyGS0 0 vt100
+          exec /bin/busybox getty -L ttyGS0 0 vt100
         '';
       };
     })

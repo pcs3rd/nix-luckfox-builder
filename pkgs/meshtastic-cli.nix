@@ -40,6 +40,7 @@ let
   deps = with python.pkgs; [
     meshtastic   # core CLI + serial/TCP transport
     pypubsub     # required by meshtastic
+    urllib3      # also required
   ];
 
   bundledLibs = pkgs.runCommand "meshtastic-cli-site-packages" {} ''

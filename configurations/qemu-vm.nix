@@ -19,6 +19,7 @@
   boot.cmdline = lib.mkForce
     "console=ttyAMA0 root=/dev/vda rw init=/sbin/init panic=1";
 
+  luckfox.support   = lib.mkForce false;
   boot.uboot.enable = lib.mkForce false;
   rockchip.enable   = lib.mkForce false;
   system.zram.enable = lib.mkForce false;

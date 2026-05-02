@@ -26,8 +26,8 @@
 { pkgs }:
 
 let
-  LUCKFOX_REV    = "438d5270a38c59a74f142dfa31ffbf51b096ce72";
-  LUCKFOX_SHA256 = "sha256-iPmQLKzgznBp3CJMvbbGrtLgd9P0jHgBrynqGnsAygI=";
+  LUCKFOX_REV    = "824b817f889c2cbff1d48fcdb18ab494a68f69d1";
+  LUCKFOX_SHA256 = "sha256-t0kiuP76j/D9i8l+o6JsYrDwUJjD/3cE3WBC+5TN2Lk=";
 
   KERNEL_DEFCONFIG = "luckfox_pico_mini_b_defconfig";
 

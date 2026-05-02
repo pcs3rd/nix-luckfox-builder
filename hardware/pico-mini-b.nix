@@ -1,21 +1,32 @@
 # Hardware profile for the Luckfox Pico Mini B.
 #
-# Place your Luckfox SDK build outputs here before building:
-#   hardware/kernel/zImage
-#   hardware/kernel/pico-mini-b.dtb
+# This file sets hardware-specific constants that apply to every build
+# (USB role-switch path, A/B slot offset, etc.) but deliberately does NOT
+# set device.kernel / device.dtb / device.kernelModulesPath here.
 #
-# Until those files are present, kernel and dtb default to null and the SD
-# image step will be skipped (rootfs + uboot bundles still build fine).
+# Those are set in configuration.nix so that QEMU configurations (which
+# import configuration.nix) can override device.kernel with the QEMU ARM
+# kernel without forcing the luckfox-kernel derivation to be evaluated —
+# Nix evaluates all module definitions even for overridden options, so any
+# derivation referenced here would be built in every context.
+#
+# ── Kernel from source ────────────────────────────────────────────────────────
+# See configuration.nix for the device.kernel / device.dtb settings that
+# build the kernel from the LuckfoxTECH SDK source via pkgs/luckfox-kernel.nix.
 
 { ... }:
 
 {
-  device = {
-    name   = "pico-mini-b";
-    # Uncomment once you have the SDK kernel outputs:
-    # kernel = ./kernel/zImage;
-    # dtb    = ./kernel/pico-mini-b.dtb;
-  };
+  device.name = "pico-mini-b";
+
+  # ── A/B rootfs slot configuration ────────────────────────────────────────
+  # Enables squashfs + overlayfs A/B upgrades with 4 partitions:
+  #   p1 = ext4 "boot"    (kernel + initramfs + boot.scr)
+  #   p2 = squashfs slot A  (read-only rootfs)
+  #   p3 = squashfs slot B  (read-only rootfs)
+  #   p4 = ext4 "persist"  (overlayfs upper/work dirs)
+  # Enable in your configuration.nix with:  system.abRootfs.enable = true;
+  system.abRootfs.slotOffset = 512;   # byte 512 = sector 1, between MBR and SPL
 
   # ── USB OTG port (RV1103 DWC2 controller at 0xfcd00000) ─────────────────
   # The RV1103 has a single USB 2.0 OTG port exposed via the Micro-USB

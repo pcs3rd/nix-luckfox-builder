@@ -1,13 +1,15 @@
-{ pkgs, lib }:
+{ pkgs, lib, buildDate ? "unknown" }:
 
+# configuration may be a single module (path or attrset) or a list of modules.
 { configuration }:
 
 lib.evalModules {
-  specialArgs = { inherit pkgs lib; };
+  # buildDate is passed from the flake (self.lastModifiedDate) and available
+  # as a plain function argument in any module: { buildDate, ... }: { ... }
+  specialArgs = { inherit pkgs lib buildDate; };
 
-  modules = [
-    configuration
-
+  modules = lib.toList configuration ++ [
+    ../modules/core/luckfox-board.nix
     ../modules/core/options.nix
     ../modules/core/rootfs.nix
     ../modules/core/services.nix
@@ -20,6 +22,7 @@ lib.evalModules {
     ../modules/core/mcu.nix
     ../modules/core/usb.nix
     ../modules/core/usb-gadget.nix
+    ../modules/core/ab-rootfs.nix
     ../modules/services/default.nix
     ../modules/networking/dhcp.nix
   ];
