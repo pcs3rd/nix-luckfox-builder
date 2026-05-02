@@ -334,19 +334,38 @@ pkgs.stdenv.mkDerivation {
     CONFIG_PARTITION_ADVANCED=y
     CONFIG_MSDOS_PARTITION=y
     # USB gadget stack via configfs.
-    # CONFIG_CONFIGFS_FS  — kernel configfs (virtual filesystem in /sys/kernel/config)
-    # CONFIG_USB_GADGET   — USB peripheral/device mode core
-    # CONFIG_USB_LIBCOMPOSITE — composite gadget support (multiple functions in one device)
-    # CONFIG_USB_CONFIGFS — userspace-configurable gadget descriptors via configfs
-    # CONFIG_USB_CONFIGFS_SERIAL — CDC-ACM function (virtual serial; appears as ttyACMx on host)
     #
-    # Without CONFIG_CONFIGFS_FS=y, /sys/kernel/config is not a mountpoint and
-    # all gadget setup fails with "Operation not permitted".
+    # RV1103 USB hardware (from live device tree):
+    #   usbdrd/usb@ffb00000  — Synopsys DWC3 OTG core (snps,* quirk properties confirm DWC3)
+    #   usb2-phy@ff3e0000    — Rockchip Inno USB2 PHY (rockchip,usbgrf property)
+    #
+    # CONFIG_USB_DWC3              — DWC3 core driver; registers the UDC in /sys/class/udc.
+    #                                Without this CONFIG_USB_GADGET has no controller to bind
+    #                                to and olddefconfig silently drops USB_CONFIGFS.
+    #                                Compatible confirmed: "snps,dwc3" (usb@ffb00000)
+    # CONFIG_USB_DWC3_OF_SIMPLE    — DT glue for the "usbdrd" wrapper node.
+    #                                Compatible confirmed: "rockchip,rv1106-dwc3" /
+    #                                "rockchip,rk3399-dwc3" — both handled by dwc3-of-simple.
+    # CONFIG_PHY_ROCKCHIP_INNO_USB2 — Rockchip Inno USB2 PHY driver.
+    #                                Compatible confirmed: "rockchip,rv1106-usb2phy"
+    #                                (usb2-phy@ff3e0000). Without the PHY, DWC3 won't probe.
+    # CONFIG_CONFIGFS_FS           — kernel configfs (/sys/kernel/config mount point)
+    # CONFIG_USB_GADGET            — USB peripheral/device mode core
+    # CONFIG_USB_LIBCOMPOSITE      — composite gadget support (multiple functions per device)
+    # CONFIG_USB_CONFIGFS          — userspace-configurable gadget descriptors via configfs
+    # CONFIG_USB_CONFIGFS_SERIAL   — CDC-ACM function (/dev/ttyACMx on host, /dev/ttyGS0 on target)
+    CONFIG_USB_DWC3=y
+    CONFIG_USB_DWC3_OF_SIMPLE=y
+    CONFIG_PHY_ROCKCHIP_INNO_USB2=y
     CONFIG_CONFIGFS_FS=y
     CONFIG_USB_GADGET=y
     CONFIG_USB_LIBCOMPOSITE=y
     CONFIG_USB_CONFIGFS=y
     CONFIG_USB_CONFIGFS_SERIAL=y
+    # Swap subsystem — without CONFIG_SWAP=y the swapon(2) syscall returns
+    # ENOSYS ("Function not implemented") and neither disk swapfiles nor
+    # zram swap can be activated, regardless of mkswap succeeding.
+    CONFIG_SWAP=y
     # zram compressed RAM swap.
     # CONFIG_ZSMALLOC — memory allocator optimised for compressed pages (zram dependency)
     # CONFIG_CRYPTO_LZ4 — lz4 compression algorithm (fast; 3:1 ratio on typical data)
