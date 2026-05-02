@@ -333,6 +333,27 @@ pkgs.stdenv.mkDerivation {
     # kernel silently produces no partition devices from a valid MBR disk.
     CONFIG_PARTITION_ADVANCED=y
     CONFIG_MSDOS_PARTITION=y
+    # USB gadget stack via configfs.
+    # CONFIG_CONFIGFS_FS  — kernel configfs (virtual filesystem in /sys/kernel/config)
+    # CONFIG_USB_GADGET   — USB peripheral/device mode core
+    # CONFIG_USB_LIBCOMPOSITE — composite gadget support (multiple functions in one device)
+    # CONFIG_USB_CONFIGFS — userspace-configurable gadget descriptors via configfs
+    # CONFIG_USB_CONFIGFS_SERIAL — CDC-ACM function (virtual serial; appears as ttyACMx on host)
+    #
+    # Without CONFIG_CONFIGFS_FS=y, /sys/kernel/config is not a mountpoint and
+    # all gadget setup fails with "Operation not permitted".
+    CONFIG_CONFIGFS_FS=y
+    CONFIG_USB_GADGET=y
+    CONFIG_USB_LIBCOMPOSITE=y
+    CONFIG_USB_CONFIGFS=y
+    CONFIG_USB_CONFIGFS_SERIAL=y
+    # zram compressed RAM swap.
+    # CONFIG_ZSMALLOC — memory allocator optimised for compressed pages (zram dependency)
+    # CONFIG_CRYPTO_LZ4 — lz4 compression algorithm (fast; 3:1 ratio on typical data)
+    # CONFIG_ZRAM — zram block device backed by compressed RAM (swap source)
+    CONFIG_ZSMALLOC=y
+    CONFIG_CRYPTO_LZ4=y
+    CONFIG_ZRAM=y
 SIZECFG
 
     make \
