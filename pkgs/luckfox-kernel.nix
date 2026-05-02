@@ -300,6 +300,14 @@ pkgs.stdenv.mkDerivation {
     CONFIG_SQUASHFS=y
     CONFIG_SQUASHFS_LZ4=y
     CONFIG_OVERLAY_FS=y
+    # initramfs/initrd support — REQUIRED for the slot-select initramfs to work.
+    # Without CONFIG_BLK_DEV_INITRD the kernel compiles out early_init_dt_check_for_initrd()
+    # and completely ignores linux,initrd-start/end in /chosen.  The result is that
+    # the kernel never reserves the initrd region, CMA claims 0x02000000 unchallenged,
+    # and boot falls through to "Waiting for root device" as if no initramfs exists.
+    CONFIG_BLK_DEV_INITRD=y
+    # Decompressor for gzip-compressed cpio initramfs (what we produce with mkimage -C gzip).
+    CONFIG_RD_GZIP=y
 SIZECFG
 
     make \
