@@ -308,6 +308,19 @@ pkgs.stdenv.mkDerivation {
     CONFIG_BLK_DEV_INITRD=y
     # Decompressor for gzip-compressed cpio initramfs (what we produce with mkimage -C gzip).
     CONFIG_RD_GZIP=y
+    # MMC/SD driver stack — pin to built-in (=y) so the SD card is visible
+    # before any root filesystem is mounted.  olddefconfig has silently changed
+    # some of these from =y to =m in recent rebuilds, causing /proc/partitions
+    # to be empty in the initramfs and the slot-select init to time out.
+    #
+    #   CONFIG_MMC        — core MMC/SD subsystem
+    #   CONFIG_MMC_BLOCK  — mmcblk block device driver (creates /dev/mmcblk*)
+    #   CONFIG_MMC_DW     — DesignWare Mobile Storage Host Controller core
+    #   CONFIG_MMC_DW_ROCKCHIP — Rockchip-specific DW-MMC glue (RV1103/RV1106)
+    CONFIG_MMC=y
+    CONFIG_MMC_BLOCK=y
+    CONFIG_MMC_DW=y
+    CONFIG_MMC_DW_ROCKCHIP=y
 SIZECFG
 
     make \
