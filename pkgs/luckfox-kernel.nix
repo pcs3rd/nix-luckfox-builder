@@ -240,6 +240,32 @@ pkgs.stdenv.mkDerivation {
         echo "Added $dtb to DTS Makefile"
       fi
     done
+
+    # ── Force USB OTG port to peripheral (device) mode ────────────────────────
+    #
+    # The RV1103/RV1106 DTS sets dr_mode = "otg" on the DWC3 controller, which
+    # relies on either extcon or a USB role-switch device to determine the active
+    # mode at runtime.  Neither the extcon nor the role-switch path works in the
+    # vendor kernel for this SoC variant, so /sys/class/usb_role/ stays empty
+    # and the usb-mode service can never set device mode explicitly.
+    #
+    # Since the Luckfox Pico is always connected as a USB peripheral (never as a
+    # host), hard-code peripheral mode in the DTS.  The DWC3 will initialise
+    # directly in device mode at boot without waiting for any role negotiation.
+    #
+    # The DWC3 node is usbdrd/usb@ffb00000.  Its dr_mode property lives in
+    # the SoC-level DTSI (rv1103.dtsi or rv1106.dtsi) or in the board DTS.
+    for dtsi in \
+        arch/arm/boot/dts/rv1103.dtsi \
+        arch/arm/boot/dts/rv1106.dtsi \
+        arch/arm/boot/dts/rv1103g.dtsi; do
+      if [ -f "$dtsi" ]; then
+        if grep -q 'dr_mode' "$dtsi"; then
+          sed -i 's/dr_mode = "otg"/dr_mode = "peripheral"/' "$dtsi"
+          echo "Patched $dtsi: dr_mode → peripheral"
+        fi
+      fi
+    done
   '';
 
   configurePhase = ''

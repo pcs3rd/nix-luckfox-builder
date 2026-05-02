@@ -41,10 +41,10 @@ in
   # ── System ──────────────────────────────────────────────────────────────────
 
   # USB OTG port mode — "host" | "device" | "otg" (auto/ID-pin, default)
-  #system.usb.mode = "host";
-
-  # USB gadget — exposes virtual functions when the OTG port is in device mode.
-  # "acm" gives a CDC-ACM serial console; connect with: screen /dev/ttyACM0 115200
+  # dr_mode is patched to "peripheral" in the DTB by luckfox-kernel.nix, so the
+  # DWC3 starts in device mode unconditionally without needing a role-switch.
+  # system.usb.mode is kept as "device" for documentation but the usb-mode
+  # service will exit cleanly (no /sys/class/usb_role/ needed).
   system.usb.mode = "device";
   system.usbGadget = {
     enable    = true;
