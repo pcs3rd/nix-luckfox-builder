@@ -330,6 +330,15 @@ PYEOF
     #   fatload x2         — loads zImage and board.dtb into DRAM-safe addresses.
     #   fdt addr 0x1E00000 — points the FDT subsystem at the loaded DTB so that
     #                        subsequent 'fdt chosen' writes go to the right blob.
+    #   fdt resize 0x1000  — expands the FDT in-place by 4096 bytes so that
+    #                        'fdt chosen' and bootz's setbootargs have room to
+    #                        add properties.  The kernel DTB has no free space
+    #                        past its last property; without resize both writes
+    #                        fail with FDT_ERR_NOSPACE.  0x1E00000..0x2000000
+    #                        is 2 MiB of headroom in DRAM so growing in-place
+    #                        is safe.  sdimage.nix also pads the DTB at build
+    #                        time with 'dtc -p 4096'; this resize is the runtime
+    #                        belt-and-suspenders in case an unpadded DTB is used.
     #   fatload initrd.img — loads the legacy mkimage ramdisk (8.3 filename).
     #                        After fatload, ''${filesize} = size of initrd.img in
     #                        hex (set by U-Boot fatload automatically).
@@ -348,7 +357,7 @@ PYEOF
     #                        without clearing our /chosen properties.
     python3 - << 'PYEOF'
 import re, sys
-bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x800000 zImage; fatload mmc 1:1 0x1E00000 board.dtb; fdt addr 0x1E00000; fatload mmc 1:1 0x2000000 initrd.img; setexpr re 0x2000000 + 0x''${filesize}; fdt chosen 0x2000040 ''${re}; bootz 0x800000 - 0x1E00000"'
+bootcmd = r'CONFIG_BOOTCOMMAND="mmc dev 1; mmc rescan; fatload mmc 1:1 0x800000 zImage; fatload mmc 1:1 0x1E00000 board.dtb; fdt addr 0x1E00000; fdt resize 0x1000; fatload mmc 1:1 0x2000000 initrd.img; setexpr re 0x2000000 + 0x''${filesize}; fdt chosen 0x2000040 ''${re}; bootz 0x800000 - 0x1E00000"'
 bootargs = 'CONFIG_BOOTARGS="${cmdline}"'
 with open('.config') as f:
     content = f.read()
@@ -375,7 +384,7 @@ PYEOF
     # Find and patch any such definitions to ensure our values take effect.
     for header in $(grep -rl "CONFIG_BOOTCOMMAND\|CONFIG_BOOTDELAY\|CONFIG_BOOTARGS" include/configs/ 2>/dev/null); do
       if grep -q '#define CONFIG_BOOTCOMMAND' "$header"; then
-        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x800000 zImage; fatload mmc 1:1 0x1E00000 board.dtb; fdt addr 0x1E00000; fatload mmc 1:1 0x2000000 initrd.img; setexpr re 0x2000000 + 0x''${filesize}; fdt chosen 0x2000040 ''${re}; bootz 0x800000 - 0x1E00000"|' "$header"
+        sed -i 's|#define CONFIG_BOOTCOMMAND .*|#define CONFIG_BOOTCOMMAND "mmc dev 1; mmc rescan; fatload mmc 1:1 0x800000 zImage; fatload mmc 1:1 0x1E00000 board.dtb; fdt addr 0x1E00000; fdt resize 0x1000; fatload mmc 1:1 0x2000000 initrd.img; setexpr re 0x2000000 + 0x''${filesize}; fdt chosen 0x2000040 ''${re}; bootz 0x800000 - 0x1E00000"|' "$header"
         echo "  patched CONFIG_BOOTCOMMAND in $header"
       fi
       if grep -q '#define CONFIG_BOOTDELAY' "$header"; then
