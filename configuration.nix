@@ -32,9 +32,9 @@ in
   # Prefer pkgs.pkgsStatic.foo — static binaries need no dynamic linker.
   packages = with localPkgs; [
     sysinfo        # lightweight system-info utility (static)
-    #top           # interactive process viewer
-    #nano           # text editor
-   #meshtastic-cli # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
+    htop           # interactive process viewer
+    nano           # text editor
+    meshtastic-cli # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
     # nrfnet is added automatically when services.nrfnet.enable = true
   ];
 
@@ -61,7 +61,7 @@ in
 
   # MCU control — toggle GPIO pins via MOSFET to reset/bootload an attached MCU.
   system.mcu = {
-    enable        = false;
+    enable        = true;
     resetPin      = 47;   # GPIO connected to the RESET MOSFET gate
     bootloaderPin = -1;   # -1 = double-tap reset (RP2040); set for BOOT pin (STM32/nRF)
   };
@@ -114,7 +114,7 @@ in
   # Setting enable = true installs /bin/nrfnet but does NOT auto-start the daemon.
   # Run manually: nrfnet --primary --spi_device=/dev/spidev0.0 --channel=42
   services.nrfnet = {
-    enable    = false;
+    enable    = true;
     role      = "primary";         # or "secondary"
     spiDevice = "/dev/spidev0.0";
     channel   = 42;
