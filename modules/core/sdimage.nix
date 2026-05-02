@@ -320,7 +320,7 @@ PYEOF
     # 0x2000040 = ih_load (0x2000000) + mkimage header (64 bytes)
     INITRD_END=$(( 0x02000040 + CPIO_GZ_SIZE ))
     INITRD_END_HEX=$(printf '0x%08x' "$INITRD_END")
-    echo "initrd.img: cpio_gz_size=${CPIO_GZ_SIZE} B  initrd-end=${INITRD_END_HEX}"
+    echo "initrd.img: cpio_gz_size=''${CPIO_GZ_SIZE} B  initrd-end=''${INITRD_END_HEX}"
 
     mkimage -A arm -O linux -T ramdisk -C gzip \
       -a 0x02000000 \
