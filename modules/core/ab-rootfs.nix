@@ -548,7 +548,13 @@ let
 
         # Show if the disk byte disagrees with what actually booted.
         if [ "$CONFIGURED" != "$RUNNING" ]; then
-          echo "next boot:  $(echo "$CONFIGURED" | tr a-z A-Z)  (still pointing at failed slot — run: slot $(echo "$RUNNING" | tr a-z A-Z))"
+          if [ -n "$FALLBACK" ]; then
+            # A fallback record exists — the configured slot genuinely failed last boot.
+            echo "next boot:  $(echo "$CONFIGURED" | tr a-z A-Z)  (still pointing at failed slot — run: slot $(echo "$RUNNING" | tr a-z A-Z))"
+          else
+            # User has manually switched slots; not a failure.
+            echo "next boot:  $(echo "$CONFIGURED" | tr a-z A-Z)  (reboot to apply)"
+          fi
         fi
         ;;
       *)
