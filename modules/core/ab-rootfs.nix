@@ -164,15 +164,19 @@ let
 
     # The kernel registers the whole disk (mmcblk1) before it finishes reading
     # the partition table and registering the individual partitions (mmcblk1p1..p4).
-    # Wait until the root partition device node actually exists before mounting.
+    # Wait until all the partitions we care about (slot A and persist) exist.
     j=0
-    while [ $j -lt 10 ] && [ ! -b "$SLOT_A" ]; do
+    while [ $j -lt 10 ] && { [ ! -b "$SLOT_A" ] || [ ! -b "$PERSIST" ]; }; do
       mdev -s 2>/dev/null || true
       sleep 1
       j=$(( j + 1 ))
     done
     if [ ! -b "$SLOT_A" ]; then
       echo "slot-select: WARNING — $SLOT_A not yet visible; /proc/partitions:" >&2
+      cat /proc/partitions >&2
+    fi
+    if [ ! -b "$PERSIST" ]; then
+      echo "slot-select: WARNING — $PERSIST not yet visible; /proc/partitions:" >&2
       cat /proc/partitions >&2
     fi
 
@@ -204,13 +208,24 @@ let
     fi
 
     # ── Mount persist partition for overlayfs upper/work dirs ───────────────
-    # Falls back to tmpfs if the persist partition isn't available yet
-    # (e.g. on first boot before persist is formatted, or in minimal test builds).
+    # On first boot the ext4 partition is raw (never formatted).  Three cases:
+    #   1. Mount succeeds (already formatted)        → use it, writes survive reboots
+    #   2. Block device exists but mount fails       → format with mke2fs, then mount
+    #   3. Block device missing (test / minimal build) → fall back to tmpfs
     if mount -t ext4 "$PERSIST" /persist 2>/dev/null; then
       echo "slot-select: persist=$PERSIST  (writes survive reboots)"
+    elif [ -b "$PERSIST" ]; then
+      echo "slot-select: formatting persist partition $PERSIST (first boot)..."
+      mke2fs -t ext4 -L "${cfg.persistLabel}" "$PERSIST" \
+        && mount -t ext4 "$PERSIST" /persist \
+        && echo "slot-select: persist formatted and mounted (first boot)" \
+        || {
+          echo "slot-select: WARNING — mke2fs failed; falling back to tmpfs (ephemeral)" >&2
+          mount -t tmpfs tmpfs /persist
+        }
     else
       mount -t tmpfs tmpfs /persist
-      echo "slot-select: WARNING — no persist partition; using tmpfs (ephemeral)"
+      echo "slot-select: WARNING — $PERSIST not found; using tmpfs (ephemeral)"
     fi
 
     mkdir -p /persist/slot-"$SLOT"/upper /persist/slot-"$SLOT"/work
@@ -288,7 +303,7 @@ let
 
     cp ${pkgs.pkgsStatic.busybox}/bin/busybox fs/bin/busybox
     chmod +x fs/bin/busybox
-    for cmd in sh mount umount dd switch_root sleep mdev awk mkdir cat insmod${lib.optionalString (cfg.swapSize > 0) " mkswap swapon"}; do
+    for cmd in sh mount umount dd switch_root sleep mdev awk mkdir cat insmod mke2fs${lib.optionalString (cfg.swapSize > 0) " mkswap swapon"}; do
       ln -sf busybox fs/bin/$cmd
     done
 

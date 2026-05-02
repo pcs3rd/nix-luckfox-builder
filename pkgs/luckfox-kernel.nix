@@ -295,8 +295,12 @@ pkgs.stdenv.mkDerivation {
     # CONFIG_WERROR: added in Linux 5.15; silently ignored by olddefconfig on 5.10.
     # Disabling it here is belt-and-suspenders alongside the KCFLAGS fix below.
     CONFIG_WERROR=n
-    # A/B boot: ensure squashfs + overlayfs are built-in (not modules) so
-    # the initramfs can mount them without needing insmod at boot.
+    # A/B boot: ensure ext4 + squashfs + overlayfs are built-in (not modules)
+    # so the initramfs can mount them without needing insmod at boot.
+    # Without CONFIG_EXT4_FS=y, olddefconfig may silently leave it as =m,
+    # causing the persist partition mount to fail (no module loaded) and the
+    # slot-select init to fall back to tmpfs — writes become ephemeral.
+    CONFIG_EXT4_FS=y
     CONFIG_SQUASHFS=y
     CONFIG_SQUASHFS_LZ4=y
     CONFIG_OVERLAY_FS=y
