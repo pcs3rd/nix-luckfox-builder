@@ -299,15 +299,34 @@ PYEOF
     ''}
 
     # Slot-select initramfs handles squashfs mount + overlay setup.
-    # Wrap in a legacy mkimage ramdisk header so U-Boot's bootz explicitly
-    # recognises the image, extracts address+size from the header, and writes
-    # linux,initrd-start / linux,initrd-end into the FDT correctly.
-    # Without the header, bootz relies on the addr:''${filesize} raw-cpio path
-    # which silently fails on the Luckfox SDK U-Boot 2017.09.
-    # initrd.img = 8.3-compatible filename (safe without LFN support in U-Boot).
-    mkimage -A arm -O linux -T ramdisk -C gzip -a 0x02000000 -e 0x02000000 \
+    #
+    # Wrap in a legacy mkimage ramdisk header so the Rockchip SDK U-Boot
+    # 2017.09 "Fdt Ramdisk skip relocation" boot path writes correct
+    # linux,initrd-start / linux,initrd-end values into the FDT /chosen node.
+    #
+    # That SDK path uses the mkimage header fields as follows:
+    #   linux,initrd-start  ← ih_load + sizeof(header)  = 0x02000040
+    #   linux,initrd-end    ← ih_ep   (entry-point field)
+    #
+    # ih_ep must therefore equal the physical end of the compressed cpio data:
+    #   ih_ep = 0x02000040 + size(cpio.gz)
+    #
+    # With the wrong ih_ep (= ih_load = 0x02000000, the old value), bootz
+    # wrote linux,initrd-end < linux,initrd-start which the kernel rejected.
+    #
+    # initrd.img = 8.3-compatible filename (safe without LFN in U-Boot).
+    CPIO_GZ=${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz
+    CPIO_GZ_SIZE=$(stat -c%s "$CPIO_GZ")
+    # 0x2000040 = ih_load (0x2000000) + mkimage header (64 bytes)
+    INITRD_END=$(( 0x02000040 + CPIO_GZ_SIZE ))
+    INITRD_END_HEX=$(printf '0x%08x' "$INITRD_END")
+    echo "initrd.img: cpio_gz_size=${CPIO_GZ_SIZE} B  initrd-end=${INITRD_END_HEX}"
+
+    mkimage -A arm -O linux -T ramdisk -C gzip \
+      -a 0x02000000 \
+      -e "$INITRD_END_HEX" \
       -n "slot-select" \
-      -d ${config.system.build.slotSelectInitramfs}/initramfs-slotselect.cpio.gz \
+      -d "$CPIO_GZ" \
       boot-staging/initrd.img
 
     # Compiled U-Boot boot script — the sole boot path for A/B images.
