@@ -63,7 +63,7 @@
   #   Single — direct extlinux.conf boot, kernel mounts p1 as the ext4 rootfs.
   boot.cmdline = lib.mkDefault (
     if config.system.abRootfs.enable
-    then "console=ttyS0 init=/sbin/init panic=1"
-    else "console=ttyS0 root=/dev/mmcblk0p1 rw rootfstype=ext4 init=/sbin/init"
+    then "console=ttyFIQ0 init=/sbin/init panic=1"
+    else "console=ttyFIQ0 root=/dev/mmcblk0p1 rw rootfstype=ext4 init=/sbin/init"
   );
 }

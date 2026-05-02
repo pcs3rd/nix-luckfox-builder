@@ -191,8 +191,8 @@ with lib;
         enable = mkEnableOption "getty";
         tty = mkOption {
           type        = types.str;
-          default     = "ttyS0";
-          description = "Serial console device. Use ttyS0 for real hardware, ttyAMA0 for QEMU virt.";
+          default     = "ttyFIQ0";
+          description = "Serial console device. Rockchip RV1103/RV1106 boards use ttyFIQ0 (FIQ debugger UART). Use ttyS0 for generic hardware, ttyAMA0 for QEMU virt.";
         };
         baud = mkOption {
           type        = types.int;
@@ -219,7 +219,7 @@ with lib;
     boot = {
       cmdline = mkOption {
         type        = types.str;
-        default     = "console=ttyS0 root=/dev/mmcblk0p1 rw rootfstype=ext4";
+        default     = "console=ttyFIQ0 root=/dev/mmcblk0p1 rw rootfstype=ext4";
         description = "Kernel command line passed by the bootloader.";
       };
 

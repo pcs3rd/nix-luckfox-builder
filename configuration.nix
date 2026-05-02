@@ -82,7 +82,7 @@ in
   system.abRootfs = {
     enable      = true;
     slotSize    = 64;   # 64 MiB per slot, explicit
-    swapSize    = 0;    # MiB of disk swap in persist partition — disable with 0
+    swapSize    = 5;    # MiB of disk swap in persist partition — disable with 0
     persistSize = 32;   # MiB for overlayfs upper/work dirs (must be > 0)
   };
 
@@ -91,7 +91,7 @@ in
   system.imageSize = 0;
   # ── Services ────────────────────────────────────────────────────────────────
 
-  services.getty.enable = true;    # serial console on ttyS0
+  services.getty.enable = true;    # serial console on ttyFIQ0 (Rockchip FIQ debugger UART)
   services.ssh.enable   = false;    # dropbear SSH; set users.root.hashedPassword first
 
   # mesh-bbs: minimal Meshtastic BBS + store-and-forward bot.
