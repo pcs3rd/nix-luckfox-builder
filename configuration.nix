@@ -92,7 +92,7 @@ in
   # ── Services ────────────────────────────────────────────────────────────────
 
   services.getty.enable = true;    # serial console on ttyFIQ0 (Rockchip FIQ debugger UART)
-  services.ssh.enable   = false;    # dropbear SSH; set users.root.hashedPassword first
+  services.ssh.enable   = true;    # dropbear SSH; set users.root.hashedPassword first
 
   # mesh-bbs: minimal Meshtastic BBS + store-and-forward bot.
   # Commands via direct message: bbs list/read/post, snf send/list
