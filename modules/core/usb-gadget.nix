@@ -180,7 +180,7 @@ in
           # Poll until it appears — the usb-gadget sysinit runs before us
           # but may still be in progress when this service starts.
           until [ -e /dev/ttyGS0 ]; do sleep 1; done
-          exec /sbin/getty -L ttyGS0 0 vt100
+          exec /bin/busybox getty -L ttyGS0 0 vt100
         '';
       };
     })
