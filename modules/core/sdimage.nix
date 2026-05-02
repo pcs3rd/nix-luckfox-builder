@@ -272,13 +272,27 @@ PYEOF
       cp ${config.device.dtb} boot-staging/${config.device.name}.dtb
 
       # ── DTB post-processing ──────────────────────────────────────────────────
-      # Disable hardware nodes that are not wired up on Mini A/B boards.
-      # fdtput modifies the binary DTB in-place; '|| true' is a no-op guard
-      # in case a future kernel DTB omits these nodes entirely.
+
+      # 1. Pad the DTB with free space so U-Boot's 'fdt chosen' can write
+      #    linux,initrd-start/end (and bootz's bootargs write) without hitting
+      #    FDT_ERR_NOSPACE.  The kernel DTB is built with zero padding — there
+      #    is no room past the last property.  dtc -p <bytes> appends that many
+      #    bytes of free space inside the blob (increases fdt_totalsize without
+      #    changing the structure).
+      #    4096 B covers: bootargs string + two u32 initrd properties + overhead.
+      dtc -q -I dtb -O dtb -p 4096 \
+        -o boot-staging/${config.device.name}.dtb.tmp \
+        boot-staging/${config.device.name}.dtb
+      mv boot-staging/${config.device.name}.dtb.tmp \
+         boot-staging/${config.device.name}.dtb
+      echo "DTB: added 4096 B padding for U-Boot FDT writes"
+
+      # 2. Disable hardware nodes not wired up on Mini A/B boards.
+      #    '|| true' guards against future DTBs that omit these nodes.
       #
-      # ffa80000.ethernet (GMAC): the SoC has a GMAC peripheral but Mini A/B
-      # boards do not break it out to any connector — disabling it silences
-      # kernel probe failures and avoids spurious network-device registration.
+      #    ffa80000.ethernet (GMAC): the SoC has a GMAC peripheral but neither
+      #    Mini A nor Mini B breaks it out to a connector — disabling it silences
+      #    kernel probe failures and avoids spurious network-device registration.
       fdtput -t s boot-staging/${config.device.name}.dtb \
         /ethernet@ffa80000 status disabled 2>/dev/null || true
       echo "DTB: disabled /ethernet@ffa80000 (not wired on Mini A/B)"
