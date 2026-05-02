@@ -169,5 +169,5 @@ in
   # ── Users ───────────────────────────────────────────────────────────────────
   # Generate a new hash with:  openssl passwd -6 yourpassword
   # The default "!" locks the root account (no password login).
-  users.root.hashedPassword = "$6$C.ixvv4jaDPZ1/1a$hU.1hdJ8ExItvl0gOL6wH7Itene4DOP8AHUfaXPHC4TGoeOGGyVC.CmkwNStNYRLxkrHsPHQTLF5W1zy4yL1x/";
+  users.root.hashedPassword = "$6$bk3p2NLeBAMNslm/$btSZ/xm8pD3QVuHQGXcrPIRBCGOydtsCK3XNKvrRtZuCEPY4jya60gaWJH6MgT/Q8LnCu750P6fIC1ETrltUh/"; # Test
 }

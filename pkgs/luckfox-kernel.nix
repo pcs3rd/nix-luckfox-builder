@@ -333,27 +333,37 @@ pkgs.stdenv.mkDerivation {
     # kernel silently produces no partition devices from a valid MBR disk.
     CONFIG_PARTITION_ADVANCED=y
     CONFIG_MSDOS_PARTITION=y
-    # USB gadget stack via configfs.
+    # USB gadget stack — dual approach: legacy g_serial + configfs.
     #
     # RV1103 USB hardware (from live device tree):
     #   usbdrd/usb@ffb00000  — Synopsys DWC3 OTG core (snps,* quirk properties confirm DWC3)
     #   usb2-phy@ff3e0000    — Rockchip Inno USB2 PHY (rockchip,usbgrf property)
     #
-    # CONFIG_USB_DWC3              — DWC3 core driver; registers the UDC in /sys/class/udc.
-    #                                Without this CONFIG_USB_GADGET has no controller to bind
-    #                                to and olddefconfig silently drops USB_CONFIGFS.
-    #                                Compatible confirmed: "snps,dwc3" (usb@ffb00000)
-    # CONFIG_USB_DWC3_OF_SIMPLE    — DT glue for the "usbdrd" wrapper node.
-    #                                Compatible confirmed: "rockchip,rv1106-dwc3" /
-    #                                "rockchip,rk3399-dwc3" — both handled by dwc3-of-simple.
-    # CONFIG_PHY_ROCKCHIP_INNO_USB2 — Rockchip Inno USB2 PHY driver.
-    #                                Compatible confirmed: "rockchip,rv1106-usb2phy"
-    #                                (usb2-phy@ff3e0000). Without the PHY, DWC3 won't probe.
-    # CONFIG_CONFIGFS_FS           — kernel configfs (/sys/kernel/config mount point)
-    # CONFIG_USB_GADGET            — USB peripheral/device mode core
-    # CONFIG_USB_LIBCOMPOSITE      — composite gadget support (multiple functions per device)
-    # CONFIG_USB_CONFIGFS          — userspace-configurable gadget descriptors via configfs
-    # CONFIG_USB_CONFIGFS_SERIAL   — CDC-ACM function (/dev/ttyACMx on host, /dev/ttyGS0 on target)
+    # Approach A — legacy gadget (CONFIG_USB_G_SERIAL):
+    #   Simpler path that does not require configfs.  When USB_G_SERIAL=y the
+    #   kernel registers a CDC-ACM gadget automatically and creates /dev/ttyGS0
+    #   as soon as the DWC3 UDC probes.  Host sees /dev/ttyACMx.  No userspace
+    #   setup script is needed; the usb-gadget service detects this and exits
+    #   early if /dev/ttyGS0 already exists.
+    #
+    # Approach B — configfs gadget (CONFIG_USB_CONFIGFS):
+    #   Flexible userspace-configurable path.  Requires CONFIG_USB_CONFIGFS=y
+    #   surviving olddefconfig (previous builds showed it being silently dropped
+    #   — likely a vendor Kconfig dependency we haven't yet identified).  Kept
+    #   here alongside g_serial so both paths are available.
+    #
+    # CONFIG_USB_DWC3              — DWC3 core driver; registers the UDC
+    # CONFIG_USB_DWC3_OF_SIMPLE    — DT glue for the "usbdrd" wrapper node
+    # CONFIG_PHY_ROCKCHIP_INNO_USB2 — Inno USB2 PHY (rv1106-usb2phy)
+    # CONFIG_USB_LIBCOMPOSITE      — required by both g_serial and configfs
+    # CONFIG_USB_U_SERIAL          — serial line discipline (selected by g_serial)
+    # CONFIG_USB_F_ACM             — CDC-ACM function (selected by g_serial)
+    # CONFIG_USB_G_SERIAL          — legacy serial gadget (Approach A)
+    # CONFIG_CONFIGFS_FS           — kernel configfs filesystem
+    # CONFIG_USB_CONFIGFS          — configfs-based gadget (Approach B)
+    # CONFIG_USB_CONFIGFS_SERIAL   — generic serial via configfs
+    # CONFIG_USB_CONFIGFS_ACM      — CDC-ACM via configfs (vendor kernel symbol)
+    # CONFIG_USB_ROLE_SWITCH       — lets Inno PHY expose /sys/class/usb_role/
     # Enable /proc/config.gz so the running kernel can be introspected.
     CONFIG_IKCONFIG=y
     CONFIG_IKCONFIG_PROC=y
@@ -370,17 +380,21 @@ pkgs.stdenv.mkDerivation {
     CONFIG_USB_DWC3=y
     CONFIG_USB_DWC3_OF_SIMPLE=y
     CONFIG_PHY_ROCKCHIP_INNO_USB2=y
-    CONFIG_CONFIGFS_FS=y
+    # Low-level USB serial building blocks (both paths need these).
     CONFIG_USB_GADGET=y
     CONFIG_USB_LIBCOMPOSITE=y
-    CONFIG_USB_CONFIGFS=y
-    CONFIG_USB_CONFIGFS_SERIAL=y
-    # USB_CONFIGFS_SERIAL selects USB_F_ACM and USB_U_SERIAL, but those selects
-    # don't propagate when USB_CONFIGFS_SERIAL itself gets dropped by olddefconfig.
-    # Pin them explicitly so the ACM function type is registered in configfs and
-    # 'mkdir functions/acm.GS0' succeeds.
     CONFIG_USB_U_SERIAL=y
     CONFIG_USB_F_ACM=y
+    # Approach A: legacy g_serial gadget (does not need configfs).
+    # USB_G_SERIAL selects USB_LIBCOMPOSITE + USB_F_ACM + USB_U_SERIAL + USB_F_OBEX.
+    CONFIG_USB_G_SERIAL=y
+    # Approach B: configfs gadget (more flexible; vendor kernel may or may not
+    # support this — USB_CONFIGFS has been observed to be stripped by
+    # olddefconfig in this vendor tree; root cause under investigation).
+    CONFIG_CONFIGFS_FS=y
+    CONFIG_USB_CONFIGFS=y
+    CONFIG_USB_CONFIGFS_SERIAL=y
+    CONFIG_USB_CONFIGFS_ACM=y
     # USB_ROLE_SWITCH — lets the Inno USB2 PHY register a role-switch device in
     # /sys/class/usb_role/.  Without it, the usb-mode service cannot force device
     # mode at boot and the board must rely on VBUS detection when a cable is plugged
@@ -405,12 +419,19 @@ SIZECFG
       HOSTCC=${hostCC} \
       olddefconfig
 
-    # ── Diagnostic: show final USB/PHY/EXTCON config values ──────────────────
-    # These lines appear in the build log.  If any critical option shows as
-    # "# CONFIG_FOO is not set" instead of "CONFIG_FOO=y", olddefconfig
+    # ── Diagnostic: show final USB/PHY/EXTCON/GADGET config values ──────────
+    # These lines appear in the Nix build log.  If any critical option shows
+    # as "# CONFIG_FOO is not set" instead of "CONFIG_FOO=y", olddefconfig
     # stripped it due to an unmet dependency — that's the root cause to fix.
-    echo "=== USB / PHY / EXTCON config after olddefconfig ==="
-    grep -E "^(CONFIG_USB|CONFIG_PHY_ROCKCHIP|CONFIG_EXTCON|CONFIG_DWC|CONFIG_CONFIGFS|CONFIG_SWAP|CONFIG_ZRAM|# CONFIG_USB|# CONFIG_PHY_ROCKCHIP)" .config | sort || true
+    #
+    # Key options to watch:
+    #   CONFIG_USB_G_SERIAL=y      — legacy serial gadget (Approach A, no configfs)
+    #   CONFIG_USB_CONFIGFS=y      — configfs gadget (Approach B)
+    #   CONFIG_USB_CONFIGFS_ACM=y  — CDC-ACM via configfs
+    #   CONFIG_PHY_ROCKCHIP_INNO_USB2=y — PHY driver (DWC3 won't probe without it)
+    #   CONFIG_USB_ROLE_SWITCH=y   — USB role-switch /sys/class/usb_role/
+    echo "=== USB / PHY / GADGET config after olddefconfig ==="
+    grep -E "^(CONFIG_USB|CONFIG_PHY_ROCKCHIP|CONFIG_EXTCON|CONFIG_CONFIGFS|CONFIG_SWAP|CONFIG_ZRAM|# CONFIG_USB|# CONFIG_PHY_ROCKCHIP|# CONFIG_CONFIGFS)" .config | sort || true
     echo "=== end USB config ==="
   '';
 
