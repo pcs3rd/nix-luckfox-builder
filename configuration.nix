@@ -82,13 +82,13 @@ in
   system.abRootfs = {
     enable      = true;
     slotSize    = 64;   # 64 MiB per slot, explicit
-    swapSize    = 5;    # MiB of disk swap in persist partition — disable with 0
-    persistSize = 32;   # MiB for overlayfs upper/work dirs (must be > 0)
+    swapSize    = 64;    # MiB of disk swap in persist partition — disable with 0
+    persistSize = 128;   # MiB for overlayfs upper/work dirs (must be > 0)
   };
 
   # Total SD image size auto-calculated from abRootfs sizes:
   #   2 MiB gap + 64 MiB boot + 64 MiB slot-A + 64 MiB slot-B + 32 MiB persist = 226 MiB
-  system.imageSize = 0;
+  system.imageSize = 0; # 0 to autocalc from system.abRootfs
   # ── Services ────────────────────────────────────────────────────────────────
 
   services.getty.enable = true;    # serial console on ttyFIQ0 (Rockchip FIQ debugger UART)
