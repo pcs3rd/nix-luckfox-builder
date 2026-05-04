@@ -241,6 +241,124 @@ pkgs.stdenv.mkDerivation {
       fi
     done
 
+    # ── Expose SPI1 as /dev/spidev0.0 for nRF24L01+ and similar modules ──────
+    #
+    # The RV1103 DTSI defines spi0 (tied to SPI NOR flash on Mini B) and spi1
+    # (the user-facing bus broken out on the GPIO header).  We enable spi1 with
+    # a "rockchip,spidev" child node — the compatible string Rockchip adds to
+    # the spidev allowlist in their vendor kernel (plain "spidev" is rejected
+    # since Linux 4.15 to prevent accidental protocol conflicts).
+    #
+    # The spi1 node name and its pinctrl labels differ slightly between
+    # rv1103.dtsi and rv1103g.dtsi — search both.  If neither file has an
+    # spi1 node we print a warning so the build log shows what happened.
+    #
+    # Wiring for nRF24L01+ on Luckfox Pico Mini A:
+    #   nRF CLK  → SPI1_CLK  (check board pinout / schematic)
+    #   nRF MOSI → SPI1_MOSI
+    #   nRF MISO → SPI1_MISO
+    #   nRF CS   → SPI1_CS0  (or any free GPIO driven by nrfnet --cs_pin)
+    #   nRF CE   → any free GPIO  (pass to nrfnet --ce_pin)
+    #   nRF IRQ  → any free GPIO (optional; nrfnet can poll instead)
+    #   VCC      → 3.3 V,  GND → GND
+    #
+    # Use Python (already in nativeBuildInputs) rather than sed: the sed
+    # address-range approach breaks when spi1: and { are on the same line
+    # (the normal DTS format), and getting multiline a\ appends right in
+    # a Nix ''...'' string is error-prone.
+    python3 - << 'PYEOF'
+import sys, os
+
+def patch_spi1(filepath):
+    with open(filepath) as f:
+        text = f.read()
+    if 'spi1:' not in text:
+        return False, 'no spi1 node'
+    if 'rockchip,spidev' in text:
+        return True, 'already patched'
+
+    lines = text.splitlines(keepends=True)
+    result = []
+    in_spi1     = False
+    brace_depth = 0
+    spi1_opened = False
+    child_added = False
+    status_fixed = False
+
+    for line in lines:
+        # Detect entry into spi1 node (label may be "spi1:" anywhere on line)
+        if not in_spi1 and 'spi1:' in line:
+            in_spi1     = True
+            brace_depth = 0
+            spi1_opened = False
+
+        if in_spi1:
+            opens  = line.count('{')
+            closes = line.count('}')
+            brace_depth += opens - closes
+
+            if opens > 0 and not spi1_opened:
+                spi1_opened = True
+
+            # Enable the node — change status = "disabled" → "okay"
+            if spi1_opened and brace_depth > 0 and 'status = "disabled"' in line and not status_fixed:
+                line = line.replace('status = "disabled"', 'status = "okay"')
+                status_fixed = True
+
+            # Insert spidev child node just before the closing }; of spi1
+            # (brace_depth hits 0 on the closing line, after we've counted
+            # the closing brace, so we prepend the child before that line).
+            if spi1_opened and not child_added and brace_depth == 0:
+                result.append('\t\tspidev@0 {\n')
+                result.append('\t\t\tcompatible = "rockchip,spidev";\n')
+                result.append('\t\t\treg = <0>;\n')
+                result.append('\t\t\tspi-max-frequency = <10000000>;\n')
+                result.append('\t\t};\n')
+                child_added = True
+                in_spi1     = False
+
+        result.append(line)
+
+    if not child_added:
+        return False, 'spi1 node found but could not inject spidev child (unexpected structure)'
+
+    if not status_fixed:
+        # spi1 had no explicit status = "disabled" — add status = "okay"
+        # right after the opening brace of the spi1 node.
+        out2 = []
+        in_spi1 = False; spi1_opened = False
+        for line in result:
+            out2.append(line)
+            if not in_spi1 and 'spi1:' in line:
+                in_spi1 = True
+            if in_spi1 and not spi1_opened and '{' in line:
+                spi1_opened = True
+                out2.append('\t\tstatus = "okay";\n')
+                in_spi1 = False
+        result = out2
+
+    with open(filepath, 'w') as f:
+        f.writelines(result)
+    return True, 'patched'
+
+patched = False
+for dtsi in [
+    'arch/arm/boot/dts/rv1103.dtsi',
+    'arch/arm/boot/dts/rv1103g.dtsi',
+    'arch/arm/boot/dts/rv1106.dtsi',
+]:
+    if not os.path.exists(dtsi):
+        continue
+    ok, msg = patch_spi1(dtsi)
+    print(f'spi1 patch — {dtsi}: {msg}')
+    if ok:
+        patched = True
+        break
+
+if not patched:
+    print('WARNING: could not patch spi1 in any RV1103/RV1106 DTSI — /dev/spidev0.0 will not appear', file=sys.stderr)
+PYEOF
+
     # ── Force USB OTG port to peripheral (device) mode ────────────────────────
     #
     # The RV1103/RV1106 DTS sets dr_mode = "otg" on the DWC3 controller, which
@@ -291,6 +409,13 @@ pkgs.stdenv.mkDerivation {
     # The sed strips leading whitespace so Kconfig sees "CONFIG_FOO=y" with
     # no indentation (required format).
     sed 's/^[[:space:]]*//' >> .config << 'SIZECFG'
+    # SPI — Rockchip SPI master + userspace spidev interface.
+    # CONFIG_SPI_ROCKCHIP covers the RV1103/RV1106 SPI controller (rk3066-spi).
+    # CONFIG_SPI_SPIDEV exposes the bus as /dev/spidevN.M for userspace drivers
+    # (e.g. nrfnet talking directly to an nRF24L01+ module).
+    CONFIG_SPI=y
+    CONFIG_SPI_ROCKCHIP=y
+    CONFIG_SPI_SPIDEV=y
     # Camera / ISP / media — hardware ISP present on RV1103 but unused here.
     CONFIG_MEDIA_SUPPORT=n
     CONFIG_VIDEO_DEV=n
