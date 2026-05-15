@@ -20,7 +20,7 @@ let
   python = pkgs.python3;
 
   NRFUTIL_VERSION = "0.5.3.post16";
-  NRFUTIL_SHA256  = "sha256-iStzYacZ9JRSN9qMz3VOlRPbMvViiFJ4WuoQjc0lAJM=";
+  NRFUTIL_SHA256  = "sha256-tyED3I5Q+SlR9RL8K28sYh2sFhRTHd+MC+OxPQIOJK0=";
   # ↑ placeholder — build once with this value; Nix will print the real hash.
 
   # intelhex is also not in all nixpkgs versions — build it from PyPI too.
