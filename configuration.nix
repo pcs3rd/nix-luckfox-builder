@@ -117,7 +117,7 @@ in
     enable  = true;
     role    = "primary";          # or "secondary"
     spiDev  = { bus = 1; cs = 0; }; # /dev/spidev1.0 — spi1 on RV1103 GPIO header
-    channel = 42;
+    channel = 1;    # nrfnet only accepts 0, 1, or 2 (ValuesConstraint in this revision)
   };
 
   # meshing-around: full-featured Meshtastic BBS bot (weather, games, APRS, …).

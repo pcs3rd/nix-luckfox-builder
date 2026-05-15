@@ -562,6 +562,10 @@ PYEOF
     CONFIG_ZSMALLOC=y
     CONFIG_CRYPTO_LZ4=y
     CONFIG_ZRAM=y
+    # TUN/TAP virtual network device — required by nrfnet to create the
+    # tunnel interface (/dev/net/tun).  Without this, nrfnet exits immediately
+    # with "Failed to open tunnel file: No such file or directory".
+    CONFIG_TUN=y
 SIZECFG
 
     make \
