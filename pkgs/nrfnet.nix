@@ -53,25 +53,32 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
   postPatch = ''
     echo "nrfnet: patching RF24 CSN to ${toString csnPin} (/dev/spidev${toString spiDev.bus}.${toString spiDev.cs})"
 
-    # Locate radio_transport.cc — the path varies between revisions.
-    RF24_SRC=$(find . -name "radio_transport.cc" | head -1)
-    if [ -z "$RF24_SRC" ]; then
-      echo "ERROR: radio_transport.cc not found — source tree layout:" >&2
-      find . -name "*.cc" | head -20 >&2
+    # Find the file(s) that construct an RF24 object — the name and location
+    # varies between revisions (radio_transport.cc, primary_radio_interface.cc, etc.).
+    RF24_FILES=$(grep -rl 'RF24(' . --include='*.cc' --include='*.cpp' 2>/dev/null || true)
+    if [ -z "$RF24_FILES" ]; then
+      echo "ERROR: no .cc/.cpp file contains RF24( — source layout:" >&2
+      find . -name "*.cc" -o -name "*.cpp" | sort >&2
       exit 1
     fi
-    echo "nrfnet: found radio_transport.cc at $RF24_SRC"
+    echo "nrfnet: RF24 constructor found in: $RF24_FILES"
 
-    sed -i 's/make_unique<RF24>(config_.ce_pin(), 0)/make_unique<RF24>(config_.ce_pin(), ${toString csnPin})/' \
-      "$RF24_SRC"
+    PATCHED=0
+    for f in $RF24_FILES; do
+      # Match any RF24(expr, 0) call — handles variations in the first argument.
+      if sed -i 's/RF24(\(.*\), 0)/RF24(\1, ${toString csnPin})/g' "$f" 2>/dev/null; then
+        if grep -q 'RF24(.*${toString csnPin})' "$f" 2>/dev/null || \
+           grep -q ', ${toString csnPin})' "$f" 2>/dev/null; then
+          echo "nrfnet: CSN patch applied in $f"
+          PATCHED=1
+        fi
+      fi
+    done
 
-    # Verify the substitution landed — fail loudly if the line changed upstream.
-    if grep -q 'make_unique<RF24>(config_.ce_pin(), ${toString csnPin})' "$RF24_SRC"; then
-      echo "nrfnet: CSN patch applied successfully"
-    else
-      echo "nrfnet: WARNING — CSN patch did not match; dumping RF24 constructor lines for diagnosis:" >&2
-      grep -n 'RF24\|make_unique' "$RF24_SRC" >&2 || true
-      echo "nrfnet: continuing build — RF24 will use default CSN=0 (/dev/spidev0.0)" >&2
+    if [ "$PATCHED" = "0" ]; then
+      echo "nrfnet: WARNING — CSN pattern RF24(..., 0) not found; dumping RF24 lines:" >&2
+      for f in $RF24_FILES; do grep -n 'RF24(' "$f" >&2 || true; done
+      echo "nrfnet: will use default CSN — RF24 may open /dev/spidev0.0 instead of /dev/spidev${toString spiDev.bus}.${toString spiDev.cs}" >&2
     fi
   '';
 
