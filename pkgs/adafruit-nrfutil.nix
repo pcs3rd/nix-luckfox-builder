@@ -25,7 +25,7 @@ let
 
   # intelhex is also not in all nixpkgs versions — build it from PyPI too.
   INTELHEX_VERSION = "2.3.0";
-  INTELHEX_SHA256  = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  INTELHEX_SHA256  = "sha256-iStzYacZ9JRSN9qMz3VOlRPbMvViiFJ4WuoQjc0lAJM=";
 
   intelhex-pkg = python.pkgs.buildPythonPackage rec {
     pname   = "intelhex";
