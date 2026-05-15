@@ -19,7 +19,7 @@ let
   lib    = pkgs.lib;
   python = pkgs.python3;
 
-  NRFUTIL_VERSION = "0.5.3.post17";
+  NRFUTIL_VERSION = "0.5.3.post16";
   NRFUTIL_SHA256  = "sha256-iStzYacZ9JRSN9qMz3VOlRPbMvViiFJ4WuoQjc0lAJM=";
   # ↑ placeholder — build once with this value; Nix will print the real hash.
 
