@@ -35,7 +35,7 @@ in
     htop             # interactive process viewer
     nano             # text editor
     meshtastic-cli   # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
-    adafruit-nrfutil # serial DFU for nRF52840 T114 firmware uploads over UART
+    # adafruit-nrfutil # re-enable once PyPI hashes are filled in pkgs/adafruit-nrfutil.nix
     # nrfnet is added automatically when services.nrfnet.enable = true
   ];
 
