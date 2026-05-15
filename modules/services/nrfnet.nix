@@ -2,11 +2,10 @@
 
 let
   cfg    = config.services.nrfnet;
-  nrfnet = import ../../pkgs/nrfnet.nix { inherit pkgs; };
+  nrfnet = import ../../pkgs/nrfnet.nix { inherit pkgs; spiDev = cfg.spiDev; };
 
   args = lib.concatStringsSep " " (
     [ "--${cfg.role}"
-      "--spi_device=${cfg.spiDevice}"
       "--channel=${toString cfg.channel}"
     ] ++ cfg.extraArgs
   );

@@ -168,10 +168,15 @@ with lib;
           description = "Node role: primary initiates the tunnel, secondary listens.";
         };
 
-        spiDevice = mkOption {
-          type        = types.str;
-          default     = "/dev/spidev0.0";
-          description = "SPI device connected to the nRF24L01+ module.";
+        spiDev = mkOption {
+          type    = types.submodule {
+            options = {
+              bus = mkOption { type = types.int; default = 1; description = "SPI bus number (B in /dev/spidevB.C)."; };
+              cs  = mkOption { type = types.int; default = 0; description = "Chip-select number (C in /dev/spidevB.C)."; };
+            };
+          };
+          default     = { bus = 1; cs = 0; };
+          description = "SPI device for the nRF24L01+ module (/dev/spidev<bus>.<cs>). RV1103 spi1 = bus 1.";
         };
 
         channel = mkOption {
