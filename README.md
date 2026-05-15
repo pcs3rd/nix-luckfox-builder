@@ -31,6 +31,110 @@ NOR so the BOOT button is no longer needed.
 
 ---
 
+## How to update the Luckfox firmware
+
+Once a device is running, you can push new firmware over SSH without
+touching the SD card. The A/B rootfs system writes to the inactive slot and
+reboots atomically — if something goes wrong it falls back automatically.
+
+**1. Edit `configuration.nix`** — change packages, services, or settings.
+
+**2. Build the new rootfs on your Mac/Linux host:**
+
+```sh
+nix build .#rootfsPartition
+# produces: result/rootfs.squashfs
+```
+
+**3. Stream it to the device:**
+
+```sh
+# Recommended — verify the image wasn't corrupted in transit
+SHA=$(sha1sum result/rootfs.squashfs | awk '{print $1}')
+ssh root@luckfox upgrade --sha1 "$SHA" < result/rootfs.squashfs
+```
+
+The device writes to the inactive slot, flips the boot pointer, and reboots.
+After it comes back up, confirm the new slot is active:
+
+```sh
+ssh root@luckfox slot
+# running:  B  (/dev/mmcblk0p3)
+# standby:  A  (/dev/mmcblk0p2)
+```
+
+**Roll back** at any time: `ssh root@luckfox "slot a && reboot"`
+
+> For compression, netcat transfers over radio links, and `slot-share` for
+> persisting config across upgrades, see **[doc/updating.md](doc/updating.md)**.
+
+---
+
+## How to update Meshtastic firmware on an attached nRF52 device
+
+The Luckfox can flash a connected Meshtastic device (Heltec T114 or similar
+nRF52840 board) over UART using `adafruit-nrfutil` — no USB cable or separate
+computer required.
+
+### Prerequisites
+
+Enable `adafruit-nrfutil` in `configuration.nix` and reflash the Luckfox:
+
+```nix
+packages = with localPkgs; [
+  # ... other packages ...
+  adafruit-nrfutil
+];
+```
+
+Wire the T114 UART to the Luckfox GPIO header:
+
+```
+T114 TX  →  Luckfox RX  (UART1_RX)
+T114 RX  →  Luckfox TX  (UART1_TX)
+T114 RST →  Luckfox GPIO 145  (direct wire, no MOSFET needed)
+GND      →  GND  (shared between both boards)
+```
+
+### Get the firmware
+
+Download the latest Meshtastic `.zip` for the T114 from the
+[Meshtastic releases page](https://github.com/meshtastic/firmware/releases).
+Copy it to the Luckfox over SSH:
+
+```sh
+scp firmware-heltec-t114-2.x.x.xxxxxxx.zip root@luckfox:/tmp/
+```
+
+### Flash over UART
+
+SSH in and run:
+
+```sh
+ssh root@luckfox
+
+# Put the T114 into DFU bootloader mode (double-tap reset)
+mcu bootloader
+
+# Flash — adjust the port and filename as needed
+adafruit-nrfutil dfu serial \
+  -pkg /tmp/firmware-heltec-t114-2.x.x.xxxxxxx.zip \
+  -p /dev/ttyS1 \
+  -b 115200
+```
+
+The flash takes 1–2 minutes. The T114 reboots automatically when done.
+
+### Verify
+
+```sh
+meshtastic --port /dev/ttyS1 --info
+```
+
+You should see the new firmware version in the output.
+
+---
+
 ## Documentation
 
 | Document | Contents |
