@@ -31,10 +31,11 @@ in
   # Binaries from each package's bin/ are copied into /bin on the rootfs.
   # Prefer pkgs.pkgsStatic.foo — static binaries need no dynamic linker.
   packages = with localPkgs; [
-    sysinfo        # lightweight system-info utility (static)
-    htop           # interactive process viewer
-    nano           # text editor
-    meshtastic-cli # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
+    sysinfo          # lightweight system-info utility (static)
+    htop             # interactive process viewer
+    nano             # text editor
+    meshtastic-cli   # meshtastic CLI  (`meshtastic --info`, `--sendtext`, etc.)
+    adafruit-nrfutil # serial DFU for nRF52840 T114 firmware uploads over UART
     # nrfnet is added automatically when services.nrfnet.enable = true
   ];
 

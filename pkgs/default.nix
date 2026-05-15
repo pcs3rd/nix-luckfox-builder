@@ -26,6 +26,7 @@
   nrfnet                 = import ./nrfnet.nix                 { inherit pkgs; };
   "mesh-bbs"             = import ./mesh-bbs                   { inherit pkgs; };
   meshtastic-cli         = import ./meshtastic-cli.nix         { inherit pkgs; };
+  adafruit-nrfutil       = import ./adafruit-nrfutil.nix       { inherit pkgs; };
   # ox64-firmware intentionally omitted here — it is imported directly by
   # hardware/ox64.nix using the pkgsRv64 package set, not the ARMv7 pkgs.
   # Build it with:  nix build .#packages.<system>.ox64-firmware
