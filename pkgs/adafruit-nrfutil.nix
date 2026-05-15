@@ -30,6 +30,7 @@ let
   intelhex-pkg = python.pkgs.buildPythonPackage rec {
     pname   = "intelhex";
     version = INTELHEX_VERSION;
+    format  = "setuptools";
     src = python.pkgs.fetchPypi {
       inherit pname version;
       sha256 = INTELHEX_SHA256;
@@ -40,6 +41,7 @@ let
   nrfutil-pkg = python.pkgs.buildPythonPackage rec {
     pname   = "adafruit-nrfutil";
     version = NRFUTIL_VERSION;
+    format  = "setuptools";
     src = python.pkgs.fetchPypi {
       inherit pname version;
       sha256 = NRFUTIL_SHA256;
