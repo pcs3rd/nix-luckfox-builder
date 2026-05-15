@@ -581,6 +581,25 @@ SIZECFG
       HOSTCC=${hostCC} \
       olddefconfig
 
+    # ── Force critical options that olddefconfig silently drops ──────────────
+    #
+    # olddefconfig evaluates Kconfig dependency graphs and can silently unset
+    # options whose dependencies it deems unmet — even if they are in fact met
+    # at build time.  Using scripts/config to re-assert them after the first
+    # olddefconfig pass, then running olddefconfig a second time, forces the
+    # options in and lets Kconfig resolve any new dependencies they pull in.
+    scripts/config \
+      --enable CONFIG_TUN \
+      --enable CONFIG_GPIOLIB \
+      --enable CONFIG_GPIO_SYSFS \
+      --enable CONFIG_GPIO_ROCKCHIP
+
+    make \
+      ARCH=arm \
+      CROSS_COMPILE=${crossCompile} \
+      HOSTCC=${hostCC} \
+      olddefconfig
+
     # ── Diagnostic: show final USB/PHY/EXTCON/GADGET config values ──────────
     # These lines appear in the Nix build log.  If any critical option shows
     # as "# CONFIG_FOO is not set" instead of "CONFIG_FOO=y", olddefconfig
@@ -592,9 +611,9 @@ SIZECFG
     #   CONFIG_USB_CONFIGFS_ACM=y  — CDC-ACM via configfs
     #   CONFIG_PHY_ROCKCHIP_INNO_USB2=y — PHY driver (DWC3 won't probe without it)
     #   CONFIG_USB_ROLE_SWITCH=y   — USB role-switch /sys/class/usb_role/
-    echo "=== USB / PHY / GADGET config after olddefconfig ==="
-    grep -E "^(CONFIG_USB|CONFIG_PHY_ROCKCHIP|CONFIG_EXTCON|CONFIG_CONFIGFS|CONFIG_SWAP|CONFIG_ZRAM|# CONFIG_USB|# CONFIG_PHY_ROCKCHIP|# CONFIG_CONFIGFS)" .config | sort || true
-    echo "=== end USB config ==="
+    echo "=== USB / PHY / GADGET / TUN / GPIO config after final olddefconfig ==="
+    grep -E "^(CONFIG_USB|CONFIG_PHY_ROCKCHIP|CONFIG_EXTCON|CONFIG_CONFIGFS|CONFIG_SWAP|CONFIG_ZRAM|CONFIG_TUN|CONFIG_GPIOLIB|CONFIG_GPIO|# CONFIG_USB|# CONFIG_PHY_ROCKCHIP|# CONFIG_CONFIGFS|# CONFIG_TUN|# CONFIG_GPIOLIB|# CONFIG_GPIO)" .config | sort || true
+    echo "=== end config ==="
   '';
 
   buildPhase = ''
