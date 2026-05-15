@@ -264,8 +264,8 @@ pkgs.stdenv.mkDerivation {
     #
     # Use Python (already in nativeBuildInputs) rather than sed: the sed
     # address-range approach breaks when spi1: and { are on the same line
-    # (the normal DTS format), and getting multiline a\ appends right in
-    # a Nix ''...'' string is error-prone.
+    # (the normal DTS format), and multiline sed a\ appends inside a Nix
+    # indented string are error-prone due to quoting and escape rules.
     python3 - << 'PYEOF'
 import sys, os
 
