@@ -59,13 +59,15 @@ let
       echo "$val" > "$GPIO_BASE/gpio$pin/value"
     }
 
-    # Pull pin LOW for PRESS_MS then release (active-low MOSFET: 1=off, 0=on)
+    # Pull pin HIGH for PRESS_MS then release (N-channel MOSFET: 1=on, 0=off).
+    # Gate HIGH → MOSFET conducts → RESET shorted to GND → MCU in reset.
+    # Gate LOW  → MOSFET off     → RESET pulled high     → MCU running.
     gpio_press() {
       local pin="$1"
       gpio_export "$pin"
-      gpio_set    "$pin" 0
-      sleep "$(echo "$PRESS_MS" | awk '{printf "%.3f", $1/1000}')"
       gpio_set    "$pin" 1
+      sleep "$(echo "$PRESS_MS" | awk '{printf "%.3f", $1/1000}')"
+      gpio_set    "$pin" 0
     }
 
     # ── Commands ──────────────────────────────────────────────────────────────
@@ -85,11 +87,11 @@ let
         if [ "$BOOT_PIN" != "-1" ] && [ -n "$BOOT_PIN" ]; then
           echo "mcu: bootloader (hold BOOT GPIO $BOOT_PIN, pulse RESET GPIO $RESET_PIN)"
           gpio_export "$BOOT_PIN"
-          gpio_set    "$BOOT_PIN" 0     # assert BOOT
+          gpio_set    "$BOOT_PIN" 1     # assert BOOT (N-channel: HIGH = on)
           sleep 0.05
           gpio_press  "$RESET_PIN"      # pulse RESET with BOOT held
           sleep 0.1
-          gpio_set    "$BOOT_PIN" 1     # release BOOT
+          gpio_set    "$BOOT_PIN" 0     # release BOOT
         else
           echo "mcu: bootloader (double-tap RESET GPIO $RESET_PIN)"
           gpio_press "$RESET_PIN"
