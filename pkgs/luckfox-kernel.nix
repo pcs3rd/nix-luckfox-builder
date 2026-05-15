@@ -566,6 +566,13 @@ PYEOF
     # tunnel interface (/dev/net/tun).  Without this, nrfnet exits immediately
     # with "Failed to open tunnel file: No such file or directory".
     CONFIG_TUN=y
+    # GPIO — sysfs interface (/sys/class/gpio/) used by /bin/mcu to drive
+    # the MOSFET reset circuit.  The Rockchip GPIO driver and sysfs export
+    # are usually selected by the vendor defconfig, but pin them here to
+    # ensure olddefconfig cannot silently drop them.
+    CONFIG_GPIOLIB=y
+    CONFIG_GPIO_SYSFS=y
+    CONFIG_GPIO_ROCKCHIP=y
 SIZECFG
 
     make \
