@@ -1,35 +1,62 @@
 # adafruit-nrfutil — serial DFU tool for nRF52840 (Adafruit bootloader)
 #
-# Used to upload Meshtastic firmware to the Heltec T114 (nRF52840) over
-# UART when USB is unavailable.  Workflow:
+# Built from PyPI since this package is not in the nixpkgs python package set.
 #
-#   1. Wire Luckfox UART TX/RX to T114 RX/TX + shared GND.
-#   2. Wire reset MOSFET to T114 RESET (GPIO 47, resetPin in mcu module).
-#   3. Enter bootloader:  mcu bootloader
-#   4. Upload firmware:   adafruit-nrfutil dfu serial -pkg firmware.zip -p /dev/ttySx -b 115200
+# ── Updating the hash ────────────────────────────────────────────────────────
+# If the build fails with a hash mismatch, run:
+#   nix-prefetch-url --unpack \
+#     https://files.pythonhosted.org/packages/source/a/adafruit-nrfutil/adafruit-nrfutil-0.5.3.post17.tar.gz
+# and replace NRFUTIL_SHA256 below.
 #
-# The firmware .zip is produced by the Meshtastic build system (or downloaded
-# from the Meshtastic GitHub releases as "firmware-heltec-t114-*.zip").
-#
-# Packaging follows the same PYTHONHOME bundling strategy as meshtastic-cli.nix:
-# copy Python stdlib + site-packages into /opt/adafruit-nrfutil so the binary
-# works on the musl rootfs without a system Python installation.
+# ── Usage on device ──────────────────────────────────────────────────────────
+#   mcu bootloader   # double-tap reset → enters Adafruit DFU bootloader
+#   adafruit-nrfutil dfu serial -pkg firmware-heltec-t114-x.x.x.zip \
+#                               -p /dev/ttyS1 -b 115200
 
 { pkgs }:
 
 let
-  lib = pkgs.lib;
-
+  lib    = pkgs.lib;
   python = pkgs.python3;
 
-  deps = with python.pkgs; [
-    adafruit-nrfutil   # core DFU tool
-    click              # CLI framework (dependency)
-    pyserial           # serial port access
-    tqdm               # progress bars
-    intelhex           # Intel HEX file parsing
-    cryptography       # signing/verification support
-  ];
+  NRFUTIL_VERSION = "0.5.3.post17";
+  NRFUTIL_SHA256  = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  # ↑ placeholder — build once with this value; Nix will print the real hash.
+
+  # intelhex is also not in all nixpkgs versions — build it from PyPI too.
+  INTELHEX_VERSION = "2.3.0";
+  INTELHEX_SHA256  = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+  intelhex-pkg = python.pkgs.buildPythonPackage rec {
+    pname   = "intelhex";
+    version = INTELHEX_VERSION;
+    src = python.pkgs.fetchPypi {
+      inherit pname version;
+      sha256 = INTELHEX_SHA256;
+    };
+    doCheck = false;
+  };
+
+  nrfutil-pkg = python.pkgs.buildPythonPackage rec {
+    pname   = "adafruit-nrfutil";
+    version = NRFUTIL_VERSION;
+    src = python.pkgs.fetchPypi {
+      inherit pname version;
+      sha256 = NRFUTIL_SHA256;
+    };
+    propagatedBuildInputs = with python.pkgs; [
+      click
+      pyserial
+      tqdm
+      cryptography
+      intelhex-pkg
+    ];
+    doCheck = false;
+  };
+
+  deps = [ nrfutil-pkg intelhex-pkg ] ++ (with python.pkgs; [
+    click pyserial tqdm cryptography
+  ]);
 
   bundledLibs = pkgs.runCommand "adafruit-nrfutil-site-packages" {} ''
     mkdir -p $out
@@ -54,14 +81,12 @@ in
 
 pkgs.stdenv.mkDerivation {
   pname   = "adafruit-nrfutil";
-  version = python.pkgs.adafruit-nrfutil.version;
+  version = NRFUTIL_VERSION;
 
   dontUnpack = true;
-
   nativeBuildInputs = [ pkgs.buildPackages.patchelf ];
-
-  dontBuild = true;
-  dontFixup = true;
+  dontBuild  = true;
+  dontFixup  = true;
 
   installPhase = ''
     # ── Python standard library ───────────────────────────────────────────
@@ -70,34 +95,25 @@ pkgs.stdenv.mkDerivation {
       pyVer=$(basename "$pyLibDir")
       mkdir -p "$out/opt/adafruit-nrfutil/lib/$pyVer"
       cp -rLT "$pyLibDir" "$out/opt/adafruit-nrfutil/lib/$pyVer"
-
       for trimDir in test unittest tkinter idlelib turtledemo lib2to3 ensurepip distutils venv; do
         rm -rf "$out/opt/adafruit-nrfutil/lib/$pyVer/$trimDir" || true
       done
       find "$out/opt/adafruit-nrfutil/lib/$pyVer" \
         -name '__pycache__' -prune -exec rm -rf {} \; 2>/dev/null || true
-
       find "$out/opt/adafruit-nrfutil/lib/$pyVer" -name '*.so*' -type f | \
-        while read -r so; do
-          patchelf --set-rpath "/lib" "$so" 2>/dev/null || true
-        done
+        while read -r so; do patchelf --set-rpath "/lib" "$so" 2>/dev/null || true; done
     done
 
     # ── Bundled site-packages ─────────────────────────────────────────────
     cp -rLT ${bundledLibs} $out/opt/adafruit-nrfutil/lib/
-
     find "$out/opt/adafruit-nrfutil/lib" -maxdepth 3 \
       \( -name 'test' -o -name 'tests' \) -type d \
       -exec rm -rf {} + 2>/dev/null || true
 
     # ── Python binary ─────────────────────────────────────────────────────
     mkdir -p $out/bin $out/lib
-
     realPython=$(find ${python}/bin -name '.python*-wrapped' | head -1)
-    if [ -z "$realPython" ]; then
-      realPython=$(readlink -f ${python}/bin/python3)
-    fi
-
+    [ -z "$realPython" ] && realPython=$(readlink -f ${python}/bin/python3)
     install -Dm755 "$realPython" $out/bin/python3.bin
 
     interp=$(patchelf --print-interpreter "$realPython" 2>/dev/null || true)
@@ -111,34 +127,13 @@ pkgs.stdenv.mkDerivation {
     # ── Shared library bundling ───────────────────────────────────────────
     copy_needed() {
       local elf="$1"
-      local rpath
-      rpath=$(patchelf --print-rpath "$elf" 2>/dev/null || true)
       patchelf --print-needed "$elf" 2>/dev/null | while read -r libname; do
         [ -f "$out/lib/$libname" ] && continue
-        found=""
-        for rdir in $(echo "$rpath" | tr ':' '\n'); do
-          [ -z "$rdir" ] && continue
-          candidate="$rdir/$libname"
-          if [ -e "$candidate" ]; then
-            found=$(readlink -f "$candidate" 2>/dev/null || echo "$candidate")
-            break
-          fi
-        done
-        if [ -z "$found" ]; then
-          found=$(find -L \
-            ${python} \
-            ${pkgs.zlib} \
-            ${pkgs.libffi} \
-            ${pkgs.openssl.out} \
-            ${pkgs.sqlite} \
-            ${pkgs.bzip2} \
-            ${pkgs.xz} \
-            ${pkgs.ncurses} \
-            ${pkgs.expat} \
-            ${pkgs.readline} \
-            ${pkgs.stdenv.cc.cc.lib} \
-            -name "$libname" -type f 2>/dev/null | head -1)
-        fi
+        found=$(find -L \
+          ${python} ${pkgs.zlib} ${pkgs.libffi} ${pkgs.openssl.out} \
+          ${pkgs.sqlite} ${pkgs.bzip2} ${pkgs.xz} ${pkgs.ncurses} \
+          ${pkgs.expat} ${pkgs.readline} ${pkgs.stdenv.cc.cc.lib} \
+          -name "$libname" -type f 2>/dev/null | head -1)
         if [ -n "$found" ] && [ -f "$found" ]; then
           install -Dm755 "$found" "$out/lib/$libname"
           patchelf --set-rpath "/lib" "$out/lib/$libname" 2>/dev/null || true
@@ -146,13 +141,7 @@ pkgs.stdenv.mkDerivation {
         fi
       done
     }
-
     copy_needed "$realPython"
-    for pyLibDir in ${python}/lib/python*/; do
-      find -L "$pyLibDir" -name '*.so*' -type f | while read -r so; do
-        copy_needed "$so"
-      done
-    done
     find -L ${bundledLibs} -name '*.so*' -type f 2>/dev/null | while read -r so; do
       copy_needed "$so"
     done
