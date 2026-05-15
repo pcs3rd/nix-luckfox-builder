@@ -5,24 +5,14 @@
 # To fill in the hash, run:
 #   nix-prefetch-github aarossig nrfnet
 # then replace NRFNET_REV and NRFNET_SHA256 below.
-#
-# spiDev: which /dev/spidevB.C to use.  RF24 SPIDEV maps CSN = B*10 + C, so:
-#   { bus = 0; cs = 0; }  →  CSN = 0   →  /dev/spidev0.0
-#   { bus = 1; cs = 0; }  →  CSN = 10  →  /dev/spidev1.0  (default — spi1 on RV1103)
-#
-# The Luckfox Pico Mini A exposes spi1 on its GPIO header; the DTS patch in
-# luckfox-kernel.nix enables it with a rockchip,spidev child, which the kernel
-# enumerates as /dev/spidev1.0.  Override spiDev if your board differs.
 
-{ pkgs, spiDev ? { bus = 1; cs = 0; } }:
+{ pkgs }:
 
 let
   NRFNET_REV    = "934b34ef4dbb071a90680a3d4326c098b0d1557d";
   NRFNET_SHA256 = "sha256-vSCRrYAAk8PEf9v7r75L0SMVSY1NU7wFNcv8q9ElT48=";
 
-  rf24   = import ./rf24.nix { inherit pkgs; };
-  # RF24 SPIDEV CSN encodes the spidev path: CSN = bus*10 + cs
-  csnPin = spiDev.bus * 10 + spiDev.cs;
+  rf24 = import ./rf24.nix { inherit pkgs; };
 in
 
 pkgs.pkgsStatic.stdenv.mkDerivation {
@@ -45,42 +35,6 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
     pkgs.pkgsStatic.tclap
     rf24
   ];
-
-  # Patch the hardcoded CSN=0 in radio_transport.cc so RF24 opens the correct
-  # /dev/spidevB.C device.  nrfnet has no --csn_pin argument; the value is
-  # baked into the RF24 constructor call: RF24(ce_pin, csn).
-  # RF24 SPIDEV interprets csn as bus*10+cs, so csn=10 → /dev/spidev1.0.
-  postPatch = ''
-    echo "nrfnet: patching RF24 CSN to ${toString csnPin} (/dev/spidev${toString spiDev.bus}.${toString spiDev.cs})"
-
-    # Find the file(s) that construct an RF24 object — the name and location
-    # varies between revisions (radio_transport.cc, primary_radio_interface.cc, etc.).
-    RF24_FILES=$(grep -rl 'RF24(' . --include='*.cc' --include='*.cpp' 2>/dev/null || true)
-    if [ -z "$RF24_FILES" ]; then
-      echo "ERROR: no .cc/.cpp file contains RF24( — source layout:" >&2
-      find . -name "*.cc" -o -name "*.cpp" | sort >&2
-      exit 1
-    fi
-    echo "nrfnet: RF24 constructor found in: $RF24_FILES"
-
-    PATCHED=0
-    for f in $RF24_FILES; do
-      # Match any RF24(expr, 0) call — handles variations in the first argument.
-      if sed -i 's/RF24(\(.*\), 0)/RF24(\1, ${toString csnPin})/g' "$f" 2>/dev/null; then
-        if grep -q 'RF24(.*${toString csnPin})' "$f" 2>/dev/null || \
-           grep -q ', ${toString csnPin})' "$f" 2>/dev/null; then
-          echo "nrfnet: CSN patch applied in $f"
-          PATCHED=1
-        fi
-      fi
-    done
-
-    if [ "$PATCHED" = "0" ]; then
-      echo "nrfnet: WARNING — CSN pattern RF24(..., 0) not found; dumping RF24 lines:" >&2
-      for f in $RF24_FILES; do grep -n 'RF24(' "$f" >&2 || true; done
-      echo "nrfnet: will use default CSN — RF24 may open /dev/spidev0.0 instead of /dev/spidev${toString spiDev.bus}.${toString spiDev.cs}" >&2
-    fi
-  '';
 
   # nrfnet's CMakeLists.txt declares cmake_minimum_required < 3.5, which CMake
   # 3.27+ rejects outright.  This flag tells CMake to apply 3.5 policies anyway
