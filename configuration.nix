@@ -63,7 +63,7 @@ in
   # MCU control — toggle GPIO pins via MOSFET to reset/bootload an attached MCU.
   system.mcu = {
     enable        = true;
-    resetPin      = 47;   # GPIO connected to the RESET MOSFET gate
+    resetPin      = 145;  # GPIO4_C1 (pin 20) connected to the RESET MOSFET gate
     bootloaderPin = -1;   # -1 = double-tap reset (RP2040); set for BOOT pin (STM32/nRF)
   };
 
