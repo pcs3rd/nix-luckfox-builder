@@ -583,16 +583,32 @@ SIZECFG
 
     # ── Force critical options that olddefconfig silently drops ──────────────
     #
-    # olddefconfig evaluates Kconfig dependency graphs and can silently unset
-    # options whose dependencies it deems unmet — even if they are in fact met
-    # at build time.  Using scripts/config to re-assert them after the first
-    # olddefconfig pass, then running olddefconfig a second time, forces the
-    # options in and lets Kconfig resolve any new dependencies they pull in.
-    scripts/config \
-      --enable CONFIG_TUN \
-      --enable CONFIG_GPIOLIB \
-      --enable CONFIG_GPIO_SYSFS \
-      --enable CONFIG_GPIO_ROCKCHIP
+    # olddefconfig silently ignores unknown symbols and can drop options whose
+    # Kconfig dependency graph it can't fully resolve.  We re-assert options
+    # using sed after the first olddefconfig pass, then run olddefconfig again
+    # so Kconfig resolves any new dependencies they pull in.
+    #
+    # scripts/config has a #!/usr/bin/env perl shebang which breaks in the Nix
+    # sandbox (no /usr/bin/env).  Use sed directly instead.
+    #
+    # Diagnostic: check whether CONFIG_TUN is even a valid Kconfig symbol in
+    # this vendor tree.  If grep returns nothing, TUN was removed from Kconfig
+    # and we need a different approach.
+    echo "=== TUN Kconfig presence ==="
+    grep -rn "config TUN" drivers/net/Kconfig || echo "WARNING: CONFIG_TUN not found in drivers/net/Kconfig"
+    echo "=== end TUN check ==="
+
+    for opt in CONFIG_TUN CONFIG_GPIOLIB CONFIG_GPIO_SYSFS CONFIG_GPIO_ROCKCHIP; do
+      if grep -q "# $opt is not set" .config; then
+        sed -i "s/# $opt is not set/$opt=y/" .config
+        echo "forced: $opt=y (was: not set)"
+      elif grep -q "^$opt=" .config; then
+        echo "already set: $(grep "^$opt=" .config)"
+      else
+        echo "$opt=y" >> .config
+        echo "appended: $opt=y (was: absent)"
+      fi
+    done
 
     make \
       ARCH=arm \
