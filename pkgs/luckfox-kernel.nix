@@ -583,31 +583,42 @@ SIZECFG
 
     # ── Force critical options that olddefconfig silently drops ──────────────
     #
-    # olddefconfig silently ignores unknown symbols and can drop options whose
-    # Kconfig dependency graph it can't fully resolve.  We re-assert options
-    # using sed after the first olddefconfig pass, then run olddefconfig again
-    # so Kconfig resolves any new dependencies they pull in.
+    # Strategy: run olddefconfig once to resolve all normal dependencies, then
+    # force our options with sed, then run olddefconfig ONCE MORE to pull in any
+    # new dependencies our forced options need, then force CONFIG_TUN a FINAL
+    # time AFTER the last olddefconfig so nothing can drop it before the build.
     #
-    # scripts/config has a #!/usr/bin/env perl shebang which breaks in the Nix
-    # sandbox (no /usr/bin/env).  Use sed directly instead.
-    #
-    # Diagnostic: check whether CONFIG_TUN is even a valid Kconfig symbol in
-    # this vendor tree.  If grep returns nothing, TUN was removed from Kconfig
-    # and we need a different approach.
-    echo "=== TUN Kconfig presence ==="
-    grep -rn "config TUN" drivers/net/Kconfig || echo "WARNING: CONFIG_TUN not found in drivers/net/Kconfig"
+    # Why CONFIG_TUN needs special treatment: the Rockchip vendor kernel may have
+    # removed CONFIG_TUN from drivers/net/Kconfig.  olddefconfig treats unknown
+    # symbols as absent and strips them.  By forcing it after all Kconfig passes,
+    # we ensure the Makefile line "obj-$(CONFIG_TUN) += tun.o" evaluates to
+    # "obj-y += tun.o" and tun.c is compiled in — as long as tun.c exists in
+    # the source tree (checked below).
+
+    # Diagnostic: confirm tun.c and its Kconfig entry exist in this vendor tree.
+    echo "=== TUN driver check ==="
+    ls drivers/net/tun.c   && echo "tun.c: present" || echo "WARNING: drivers/net/tun.c missing — TUN cannot be built"
+    grep -n "config TUN" drivers/net/Kconfig \
+      && echo "Kconfig: CONFIG_TUN symbol present" \
+      || echo "NOTE: CONFIG_TUN absent from Kconfig (will force in .config directly)"
     echo "=== end TUN check ==="
 
-    for opt in CONFIG_TUN CONFIG_GPIOLIB CONFIG_GPIO_SYSFS CONFIG_GPIO_ROCKCHIP; do
+    # Pass 1: force options, then run olddefconfig to resolve their deps.
+    force_config() {
+      local opt="$1"
       if grep -q "# $opt is not set" .config; then
         sed -i "s/# $opt is not set/$opt=y/" .config
-        echo "forced: $opt=y (was: not set)"
+        echo "forced(1): $opt=y"
       elif grep -q "^$opt=" .config; then
-        echo "already set: $(grep "^$opt=" .config)"
+        echo "already: $(grep "^$opt=" .config)"
       else
         echo "$opt=y" >> .config
-        echo "appended: $opt=y (was: absent)"
+        echo "appended(1): $opt=y"
       fi
+    }
+
+    for opt in CONFIG_GPIOLIB CONFIG_GPIO_SYSFS CONFIG_GPIO_ROCKCHIP CONFIG_TUN; do
+      force_config "$opt"
     done
 
     make \
@@ -615,6 +626,15 @@ SIZECFG
       CROSS_COMPILE=${crossCompile} \
       HOSTCC=${hostCC} \
       olddefconfig
+
+    # Pass 2: force CONFIG_TUN again AFTER the final olddefconfig so it cannot
+    # be dropped.  No further olddefconfig run follows — this value goes to make.
+    echo "=== final CONFIG_TUN force ==="
+    sed -i '/^# CONFIG_TUN is not set/d' .config
+    sed -i '/^CONFIG_TUN=/d'             .config
+    echo "CONFIG_TUN=y"                 >> .config
+    grep "CONFIG_TUN" .config || echo "WARNING: CONFIG_TUN still missing after force"
+    echo "=== end final force ==="
 
     # ── Diagnostic: show final USB/PHY/EXTCON/GADGET config values ──────────
     # These lines appear in the Nix build log.  If any critical option shows

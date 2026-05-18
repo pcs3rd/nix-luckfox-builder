@@ -17,6 +17,7 @@
     ./meshing-around.nix
     ./meshtasticd.nix
     ./nrfnet.nix
+    ./rf24gateway.nix
     ./hello.nix
     ./zram.nix
     ./mesh-bbs.nix

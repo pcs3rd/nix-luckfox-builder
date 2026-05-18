@@ -27,6 +27,9 @@
   "mesh-bbs"             = import ./mesh-bbs                   { inherit pkgs; };
   meshtastic-cli         = import ./meshtastic-cli.nix         { inherit pkgs; };
   adafruit-nrfutil       = import ./adafruit-nrfutil.nix       { inherit pkgs; };
+  rf24network            = import ./rf24network.nix            { inherit pkgs; };
+  rf24mesh               = import ./rf24mesh.nix               { inherit pkgs; };
+  rf24gateway            = import ./rf24gateway.nix            { inherit pkgs; };
   # ox64-firmware intentionally omitted here — it is imported directly by
   # hardware/ox64.nix using the pkgsRv64 package set, not the ARMv7 pkgs.
   # Build it with:  nix build .#packages.<system>.ox64-firmware

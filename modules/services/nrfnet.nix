@@ -31,12 +31,22 @@ in
 
     { packages = [ nrfnet ]; }
 
-    # Symlink the real spidev path to spidev0.0 so RF24 finds it.
+    # Create /dev/net/tun device node and symlink spidev at boot.
+    # busybox mdev does not auto-create /dev/net/tun even when CONFIG_TUN=y;
+    # the node must be created explicitly before nrfnet opens the tunnel.
     (lib.mkIf (cfg.spiDev.bus != 0 || cfg.spiDev.cs != 0) {
       services.user."spidev-alias" = {
         enable = true;
         action = "sysinit";
-        script = spiAlias;
+        script = ''
+          # TUN device node — major 10, minor 200
+          if [ ! -e /dev/net/tun ]; then
+            mkdir -p /dev/net
+            mknod /dev/net/tun c 10 200
+            echo "nrfnet-init: created /dev/net/tun"
+          fi
+          ${spiAlias}
+        '';
       };
     })
 

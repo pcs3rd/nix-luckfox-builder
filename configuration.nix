@@ -121,6 +121,19 @@ in
     channel = 1;    # nrfnet only accepts 0, 1, or 2 (ValuesConstraint in this revision)
   };
 
+  # rf24gateway: RF24Network/Mesh TUN/TAP IP gateway (replaces nrfnet).
+  # More actively maintained; supports multi-hop mesh via RF24Mesh.
+  # Requires CONFIG_TUN=y in the kernel (same as nrfnet).
+  # Switch to this and disable services.nrfnet once CONFIG_TUN is confirmed working.
+  services.rf24gateway = {
+    enable  = false;
+    cePin   = 62;       # GPIO1_C6 — physical pin 9 on Mini A header
+    channel = 1;
+    nodeId  = 0;        # 0 = master/gateway
+    ip      = "10.0.0.1";
+    mask    = "255.255.255.0";
+  };
+
   # meshing-around: full-featured Meshtastic BBS bot (weather, games, APRS, …).
   # Disabled by default — use mesh-bbs above for a leaner alternative.
   services."meshing-around" = {
