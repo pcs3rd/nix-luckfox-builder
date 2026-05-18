@@ -586,7 +586,45 @@ EOF
       };
 
       devShells.default = hostPkgs.mkShell {
-        buildInputs = [ hostPkgs.nixpkgs-fmt hostPkgs.qemu ];
+        buildInputs = with hostPkgs; [
+          # Nix tooling
+          nixpkgs-fmt        # format .nix files: nixpkgs-fmt **/*.nix
+
+          # Build helpers
+          git                # required for flake input tracking + dirty-tree detection
+          gnumake            # occasionally useful for manual kernel config inspection
+
+          # Flashing
+          rkdeveloptool      # Rockchip USB flashing tool (maskrom mode)
+
+          # Serial console — connect to the Luckfox UART / USB-serial
+          picocom            # picocom -b 115200 /dev/ttyUSB0
+
+          # QEMU ARM emulation — nix run .#qemu-ab (Linux hosts only)
+        ] ++ lib.optionals (lib.hasSuffix "-linux" system) [
+          qemu               # qemu-system-arm for A/B rootfs testing
+        ];
+
+        shellHook = ''
+          echo ""
+          echo "  nix-luckfox-builder dev shell"
+          echo ""
+          echo "  Build targets:"
+          echo "    nix build .#packages.${system}.sdImage-flashable   — full SD image"
+          echo "    nix build .#packages.${system}.rootfsPartition      — rootfs only (for upgrade)"
+          echo "    nix build .#packages.${system}.luckfox-kernel       — kernel + DTBs only"
+          echo ""
+          echo "  Flash:"
+          echo "    sudo dd if=result/sd-flashable.img of=/dev/sdX bs=4M status=progress"
+          echo ""
+          echo "  Upgrade over SSH:"
+          echo "    SHA=\$(sha1sum result/rootfs.squashfs | awk '{print \$1}')"
+          echo "    ssh root@luckfox upgrade --sha1 \"\$SHA\" < result/rootfs.squashfs"
+          echo ""
+          echo "  Serial console:"
+          echo "    picocom -b 115200 /dev/ttyUSB0"
+          echo ""
+        '';
       };
 
       # packages.default replaces the deprecated defaultPackage output.
