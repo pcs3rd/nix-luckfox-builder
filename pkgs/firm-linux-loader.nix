@@ -34,5 +34,5 @@ pkgs.fetchurl {
 
   # FIXME ── replace with the real hash before building:
   #   nix-prefetch-url https://github.com/linux-3ds/firm_linux_loader/releases/download/v2.1/firm_linux_loader.firm
-  sha256 = sha256-yJh374j0TBCbZhkm+AGlbPQg9jcqMQ+6U6ThMLjVgq8=;
+  sha256 = "sha256-yJh374j0TBCbZhkm+AGlbPQg9jcqMQ+6U6ThMLjVgq8=";
 }
