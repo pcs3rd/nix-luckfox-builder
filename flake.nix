@@ -3,9 +3,24 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # Stable nixpkgs used for the Nintendo 3DS cross-compilation toolchain.
+    #
+    # The armv6l-linux bootstrap-tools must be SUBSTITUTED from cache.nixos.org
+    # rather than built locally, because building them requires personality(PER_LINUX32)
+    # which fails on aarch64-linux kernels without CONFIG_COMPAT.
+    #
+    # nixpkgs-unstable does not guarantee per-platform hydra coverage, so the
+    # armv6l bootstrap-tools may not be in cache for a given unstable revision.
+    # The stable channel (nixos-24.05) has complete armv6l coverage — hydra builds
+    # and caches all supported platforms for every stable release.
+    #
+    # Only pkgs3ds (the armv6l cross-pkgs) uses this input; everything else
+    # continues to use nixpkgs-unstable.
+    nixpkgs-stable.url = "github:NixOS/nixpkgs/nixos-24.05";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, nixpkgs-stable }:
   let
     lib = nixpkgs.lib;
 
@@ -146,17 +161,21 @@
       # ── Cross-compilation packages: build on host, target ARMv6 ─────────────
       # Used for the Nintendo 3DS (ARM11 MPCore, ARMv6K).
       #
-      # We use lib.systems.examples.raspberryPi (armv6l-unknown-linux-gnueabihf)
-      # rather than a custom armv6l-musleabihf triple because the raspberryPi
-      # target has pre-built bootstrap tools in cache.nixos.org.  A custom musl
-      # triple is NOT cached and would require building bootstrap tools natively
-      # on an armv6l machine — which no builder in this setup provides.
+      # IMPORTANT: uses nixpkgs-stable (nixos-24.05), NOT nixpkgs-unstable.
       #
-      # The glibc vs musl distinction only matters for DYNAMICALLY linked binaries.
-      # The 3DS rootfs uses pkgs.pkgsStatic.{busybox,dropbear} exclusively — fully
-      # static musl binaries — so the crossSystem libc is irrelevant in practice.
-      pkgs3ds = import nixpkgs {
-        inherit system;
+      # Reason: building armv6l packages requires personality(PER_LINUX32) when
+      # the armv6l bootstrap-tools are not in the binary cache.  This syscall
+      # fails on aarch64-linux kernels without CONFIG_COMPAT.  The unstable channel
+      # does not guarantee armv6l coverage in hydra, so bootstrap-tools may be
+      # absent.  The stable channel (24.05) has complete armv6l coverage — every
+      # stable release is fully cached — so Nix substitutes the bootstrap-tools
+      # from cache rather than building them, bypassing the personality issue.
+      #
+      # crossSystem = raspberryPi → armv6l-unknown-linux-gnueabihf (cached).
+      # The glibc vs musl distinction only matters for dynamic binaries; the 3DS
+      # rootfs uses pkgsStatic.{busybox,dropbear} (fully static musl) throughout.
+      pkgs3ds = import nixpkgs-stable {
+        system = linuxSystem;
         crossSystem = lib.systems.examples.raspberryPi;
       };
 
@@ -174,6 +193,7 @@
 
       # ── Nintendo 3DS module evaluator ────────────────────────────────────────
       # Replaces luckfox-board / Rockchip modules with 3ds-board / 3ds-sdcard.
+      # lib comes from pkgs3ds (nixpkgs-stable) to stay consistent with pkgs3ds.
       mkSystem3ds = import ./lib/mkSystem3ds.nix {
         pkgs      = pkgs3ds;
         lib       = pkgs3ds.lib;
