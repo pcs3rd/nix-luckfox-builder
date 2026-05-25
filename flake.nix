@@ -143,14 +143,41 @@
         crossSystem = { config = "armv7l-unknown-linux-musleabihf"; };
       };
 
+      # ── Cross-compilation packages: build on host, target ARMv6 musl ───────
+      # Used for the Nintendo 3DS (ARM11 MPCore, ARMv6K).
+      # armv6l-unknown-linux-musleabihf: ARMv6 + musl libc + hard-float VFP.
+      # This gives us static busybox, dropbear, etc. for the 3DS rootfs.
+      pkgs3ds = import nixpkgs {
+        inherit system;
+        crossSystem = { config = "armv6l-unknown-linux-musleabihf"; };
+      };
+
+      buildDate =
+        let d = self.lastModifiedDate or "00000000000000";
+        in "${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d}";
+
       mkSystem   = import ./lib/mkSystem.nix {
         inherit pkgs;
         lib      = pkgs.lib;
         # Format self.lastModifiedDate (YYYYMMDDHHmmss) → YYYY-MM-DD.
         # Falls back to "unknown" for dirty trees where lastModifiedDate is absent.
-        buildDate =
-          let d = self.lastModifiedDate or "00000000000000";
-          in "${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d}";
+        inherit buildDate;
+      };
+
+      # ── Nintendo 3DS module evaluator ────────────────────────────────────────
+      # Replaces luckfox-board / Rockchip modules with 3ds-board / 3ds-sdcard.
+      mkSystem3ds = import ./lib/mkSystem3ds.nix {
+        pkgs      = pkgs3ds;
+        lib       = pkgs3ds.lib;
+        inherit buildDate;
+      };
+
+      # ── Nintendo 3DS system evaluation ───────────────────────────────────────
+      # Cross-compiles busybox, dropbear, and all services for ARMv6 musl,
+      # then packs them as an initramfs alongside the linux-3ds kernel.
+      # Output: system.build.sdcardFilesystem
+      threeDS = mkSystem3ds {
+        configuration = ./configurations/nintendo-3ds.nix;
       };
 
       # Raw U-Boot derivation — exposes SPL (idbloader), u-boot.img, and download.bin.
@@ -558,6 +585,30 @@ EOF
         sdImage-flashable     = picoMiniB-sdimage.config.system.build.sdImage;
         rootfsPartition       = picoMiniB-sdimage.config.system.build.rootfsPartition;
         slotSelectInitramfs   = picoMiniB-sdimage.config.system.build.slotSelectInitramfs;
+
+        # ── Nintendo 3DS output ─────────────────────────────────────────────────
+        # SD card filesystem: copy result/* to your 3DS SD card.
+        #
+        # Prerequisites on the SD card:
+        #   • Luma3DS installed (standard CFW — https://3ds.hacks.guide)
+        #   • No existing /linux/ or /luma/payloads/firm_linux_loader.firm
+        #     (this build provides both)
+        #
+        # Build:
+        #   nix build .#nintendo-3ds-sdcard
+        #
+        # Flash:
+        #   cp -r result/* /Volumes/NO\ NAME/          # macOS
+        #   cp -r result/* /mnt/sdcard/               # Linux
+        #
+        # Boot:
+        #   Hold [START] while powering on → Luma3DS chainloader
+        #   → select "firm_linux_loader" → Linux boots on top screen
+        #
+        # Note: pkgs/nintendo-3ds-kernel.nix and pkgs/firm-linux-loader.nix
+        # contain sha256 = lib.fakeSha256 placeholders.  Replace them with the
+        # real hashes (see comments in each file) before this target will build.
+        "nintendo-3ds-sdcard" = threeDS.config.system.build.sdcardFilesystem;
 
         # QEMU A/B test — squashfs + overlayfs boot via U-Boot (-bios).
         # Darwin hosts need a configured Linux builder to build the ARM kernel.

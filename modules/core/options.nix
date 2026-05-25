@@ -682,15 +682,62 @@ with lib;
     };
 
     system.build = {
-      rootfs             = mkOption { type = types.path; readOnly = true; };
-      initramfs          = mkOption { type = types.path; readOnly = true; };
-      image              = mkOption { type = types.path; readOnly = true; };
-      sdImage            = mkOption { type = types.path; readOnly = true; };
-      uboot              = mkOption { type = types.path; readOnly = true; };
-      rockchip           = mkOption { type = types.path; readOnly = true; };
-      firmware           = mkOption { type = types.path; readOnly = true; };
+      rootfs    = mkOption { type = types.path; readOnly = true; };
+      initramfs = mkOption { type = types.path; readOnly = true; };
+
+      # ── Platform-specific build outputs ──────────────────────────────────────
+      # These are set by platform modules (image.nix, sdimage.nix, uboot.nix,
+      # rockchip.nix, firmware.nix) when those modules are included.
+      # Targets that don't include those modules (e.g. Nintendo 3DS) leave them
+      # null; use system.build.sdcardFilesystem instead.
+      image    = mkOption {
+        type     = types.nullOr types.path;
+        default  = null;
+        readOnly = true;
+        description = "Single ext4 disk image (set by image.nix). Null on non-Rockchip targets.";
+      };
+      sdImage  = mkOption {
+        type     = types.nullOr types.path;
+        default  = null;
+        readOnly = true;
+        description = "Flashable SD card image (set by sdimage.nix). Null on non-Rockchip targets.";
+      };
+      uboot    = mkOption {
+        type     = types.nullOr types.path;
+        default  = null;
+        readOnly = true;
+        description = "U-Boot binary bundle (set by uboot.nix). Null on non-Rockchip targets.";
+      };
+      rockchip = mkOption {
+        type     = types.nullOr types.path;
+        default  = null;
+        readOnly = true;
+        description = "Rockchip flashing bundle (set by rockchip.nix). Null on non-Rockchip targets.";
+      };
+      firmware = mkOption {
+        type     = types.nullOr types.path;
+        default  = null;
+        readOnly = true;
+        description = "Firmware package for flashing (set by firmware.nix). Null on non-Rockchip targets.";
+      };
+
+      # ── Nintendo 3DS output ───────────────────────────────────────────────────
+      # Directory tree to copy to the 3DS SD card.  Set by modules/core/3ds-sdcard.nix.
+      # Layout:
+      #   luma/payloads/firm_linux_loader.firm  — Luma3DS chainloader payload
+      #   linux/zImage                           — Linux kernel
+      #   linux/initramfs.cpio.gz               — rootfs packed as initramfs
+      #   linux/cmdline.txt                     — kernel command line
+      sdcardFilesystem = mkOption {
+        type     = types.nullOr types.path;
+        default  = null;
+        readOnly = true;
+        description = "3DS SD card directory tree (set by 3ds-sdcard.nix). Null on non-3DS targets.";
+      };
+
       slotSelectInitramfs = mkOption {
         type        = types.nullOr types.path;
+        default     = null;
         readOnly    = true;
         description = ''
           The slot-select initramfs cpio.gz produced by ab-rootfs.nix.
@@ -700,6 +747,7 @@ with lib;
       };
       rootfsPartition = mkOption {
         type        = types.nullOr types.path;
+        default     = null;
         readOnly    = true;
         description = ''
           A standalone squashfs image of the rootfs, suitable for streaming
