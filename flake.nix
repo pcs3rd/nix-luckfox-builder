@@ -143,13 +143,21 @@
         crossSystem = { config = "armv7l-unknown-linux-musleabihf"; };
       };
 
-      # ── Cross-compilation packages: build on host, target ARMv6 musl ───────
+      # ── Cross-compilation packages: build on host, target ARMv6 ─────────────
       # Used for the Nintendo 3DS (ARM11 MPCore, ARMv6K).
-      # armv6l-unknown-linux-musleabihf: ARMv6 + musl libc + hard-float VFP.
-      # This gives us static busybox, dropbear, etc. for the 3DS rootfs.
+      #
+      # We use lib.systems.examples.raspberryPi (armv6l-unknown-linux-gnueabihf)
+      # rather than a custom armv6l-musleabihf triple because the raspberryPi
+      # target has pre-built bootstrap tools in cache.nixos.org.  A custom musl
+      # triple is NOT cached and would require building bootstrap tools natively
+      # on an armv6l machine — which no builder in this setup provides.
+      #
+      # The glibc vs musl distinction only matters for DYNAMICALLY linked binaries.
+      # The 3DS rootfs uses pkgs.pkgsStatic.{busybox,dropbear} exclusively — fully
+      # static musl binaries — so the crossSystem libc is irrelevant in practice.
       pkgs3ds = import nixpkgs {
         inherit system;
-        crossSystem = { config = "armv6l-unknown-linux-musleabihf"; };
+        crossSystem = lib.systems.examples.raspberryPi;
       };
 
       buildDate =
