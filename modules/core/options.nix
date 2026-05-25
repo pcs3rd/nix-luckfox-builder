@@ -731,7 +731,6 @@ with lib;
       sdcardFilesystem = mkOption {
         type     = types.nullOr types.path;
         default  = null;
-        readOnly = true;
         description = "3DS SD card directory tree (set by 3ds-sdcard.nix). Null on non-3DS targets.";
       };
 
