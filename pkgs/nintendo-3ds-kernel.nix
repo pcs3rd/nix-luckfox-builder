@@ -6,17 +6,19 @@
 #
 # Source: https://github.com/linux-3ds/linux
 # The linux-3ds project maintains a patched Linux kernel for the 3DS family,
-# with support for the ARM11 MPCore, the 3DS display, and the SD card.
+# based on Linux 5.11.0-rc1, with support for the ARM11 MPCore, the 3DS
+# framebuffer display, TMIO SD card controller, and BCM WiFi.
 #
 # ── Updating the kernel ───────────────────────────────────────────────────────
 #
-# 1. Find the latest commit on the tracking branch:
-#      https://github.com/linux-3ds/linux/commits/3ds-6.1
+# 1. Find the latest commit on master:
+#      https://github.com/linux-3ds/linux/commits/master
 #
 # 2. Get the new hash:
 #      nix-prefetch-github linux-3ds linux --rev <new-commit-sha>
 #
-# 3. Update rev and sha256 below, and modDirVersion if the base kernel changed.
+# 3. Update rev and sha256 below.  modDirVersion should stay "5.11.0-rc1"
+#    until the linux-3ds project rebases onto a newer kernel version.
 #
 # ── Build note ────────────────────────────────────────────────────────────────
 #
@@ -38,25 +40,27 @@ let
   linux3dsSrc = pkgs.fetchFromGitHub {
     owner  = "linux-3ds";
     repo   = "linux";
-    # Track the 3ds-6.1 LTS branch.  Pin to a specific commit for
-    # reproducibility — update rev + sha256 together when bumping.
-    # Latest commit as of this writing; check the branch for newer ones.
-    rev    = "refs/heads/3ds-6.1";
-    # FIXME ── replace with the real hash before building:
-    #   nix-prefetch-github linux-3ds linux --rev refs/heads/3ds-6.1
-    sha256 = pkgs.lib.fakeSha256;
+    # The linux-3ds/linux repository has only one branch: master.
+    # Pin to a specific commit for reproducibility — update rev + sha256
+    # together when bumping (see "Updating the kernel" above).
+    # FIXME ── replace with a pinned commit SHA for reproducibility:
+    #   nix-prefetch-github linux-3ds linux --rev master
+    rev    = "7071ec29fd3ebd55d00a70cb6482e98d4702c5f2";
+    sha256 = "sha256-mNbs3uxt19MUg6kmnI/KLwFzFvfF5e9PQHp3rX16zmI=";
   };
 
 in
   armv6Pkgs.buildLinux {
     src           = linux3dsSrc;
-    version       = "6.1.0-3ds";
-    modDirVersion = "6.1.0";
+    # Must match the kernel Makefile on master:
+    #   VERSION = 5, PATCHLEVEL = 11, SUBLEVEL = 0, EXTRAVERSION = -rc1
+    version       = "5.11.0-rc1-3ds";
+    modDirVersion = "5.11.0-rc1";
 
-    # The linux-3ds repo ships a 3DS-specific defconfig.
-    # Located at arch/arm/configs/3ds_defconfig in the source tree.
-    # This sets the ARM11 MPCore CPU type, enables the 3DS framebuffer,
-    # SD card (TMIO), WiFi (and its firmware blobs), etc.
+    # The linux-3ds master branch ships a 3DS-specific defconfig at
+    # arch/arm/configs/3ds_defconfig in the source tree.
+    # It sets the ARM11 MPCore CPU type, enables the 3DS framebuffer,
+    # SD card (TMIO), WiFi (BCM43362/BCM4334), etc.
     defconfig = "3ds_defconfig";
 
     # Extra options layered on top of 3ds_defconfig needed by our rootfs.
